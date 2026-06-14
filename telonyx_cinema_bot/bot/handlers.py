@@ -8,7 +8,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from telonyx_cinema_bot.bot.publisher import AiogramPublisher, TelegramPollReader
+from telonyx_cinema_bot.bot.publisher import AiogramPublisher
 from telonyx_cinema_bot.config import Settings
 from telonyx_cinema_bot.services.content import ContentService
 from telonyx_cinema_bot.services.dates import local_date_now
@@ -17,6 +17,7 @@ from telonyx_cinema_bot.services.dates import local_date_now
 class SubmitMovieStates(StatesGroup):
     waiting_for_url = State()
     waiting_for_title = State()
+    waiting_for_confirmation = State()
 
 
 def _main_menu() -> InlineKeyboardMarkup:
@@ -163,27 +164,86 @@ def build_router(
             )
             return
 
+        movie = await movie_provider.search_best_match(title)
+        if not movie:
+            await message.answer(
+                f"❌ TMDb не нашёл фильм «{title}». Попробуйте другое название (оригинальное или год):",
+                reply_markup=_cancel_menu(),
+            )
+            return
+
+        await state.update_data(title=title, tmdb_id=movie.tmdb_id)
+        await state.set_state(SubmitMovieStates.waiting_for_confirmation)
+
+        confirm_kb = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="✅ Да, это он", callback_data="submit:confirm_yes"),
+                    InlineKeyboardButton(text="❌ Нет, другой", callback_data="submit:confirm_no"),
+                ],
+                [InlineKeyboardButton(text="❌ Отмена", callback_data="menu:cancel")]
+            ]
+        )
+        await message.answer(
+            f"🔎 <b>Найден фильм:</b>\n"
+            f"Название: {movie.display_title}\n"
+            f"Описание: {movie.overview or 'Нет описания'}\n\n"
+            "Это тот фильм?",
+            parse_mode=ParseMode.HTML,
+            reply_markup=confirm_kb,
+        )
+
+    # ── submit: step 3 handler – confirm match ─────────────
+
+    @router.callback_query(StateFilter(SubmitMovieStates.waiting_for_confirmation), F.data.startswith("submit:confirm_"))
+    async def fsm_confirm_match(callback: CallbackQuery, state: FSMContext) -> None:
+        if not _is_admin_cb(callback):
+            return
+
+        action = callback.data.split(":")[1]
+        if action == "confirm_no":
+            await state.set_state(SubmitMovieStates.waiting_for_title)
+            if callback.message:
+                await callback.message.edit_text(
+                    "Введите другое название фильма:",
+                    reply_markup=_cancel_menu(),
+                )
+            await callback.answer()
+            return
+
         data = await state.get_data()
         tiktok_url = data.get("tiktok_url", "")
+        title = data.get("title", "")
+        tmdb_id = data.get("tmdb_id")
         await state.clear()
+
+        if callback.message:
+            await callback.message.edit_text("⏳ Генерирую черновик...")
 
         try:
             async with session_factory() as session:
                 async with session.begin():
                     service = await _svc(session)
-                    draft = await service.submit(tiktok_url, title, message.from_user.id)
-                    await message.answer(
+                    draft = await service.submit(tiktok_url, title, callback.from_user.id, tmdb_id=tmdb_id)
+                    text = (
                         f"✅ <b>Черновик #{draft.id}</b> создан:\n\n"
                         f"{draft.card_text}\n\n"
-                        "Проверьте карточку и выберите действие:",
-                        parse_mode=ParseMode.HTML,
-                        disable_web_page_preview=True,
-                        reply_markup=_draft_actions(draft.id),
+                        "Проверьте карточку и выберите действие:"
                     )
+                    if callback.message:
+                        await callback.message.answer(
+                            text,
+                            parse_mode=ParseMode.HTML,
+                            disable_web_page_preview=True,
+                            reply_markup=_draft_actions(draft.id),
+                        )
         except ValueError as exc:
-            await message.answer(f"❌ Ошибка: {exc}")
+            if callback.message:
+                await callback.message.answer(f"❌ Ошибка: {exc}")
 
-        await message.answer("Главное меню:", reply_markup=_main_menu())
+        if callback.message:
+            await callback.message.answer("Главное меню:", reply_markup=_main_menu())
+        await callback.answer()
 
     # ── pending drafts ──────────────────────────────────────────────────
 
@@ -300,7 +360,6 @@ def build_router(
                 publisher = AiogramPublisher(bot, settings.telegram_channel_id)
                 recommendation = await service.create_recommendation(
                     publisher,
-                    TelegramPollReader(),
                     local_date_now(settings.zoneinfo),
                 )
 

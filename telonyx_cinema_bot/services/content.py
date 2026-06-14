@@ -28,6 +28,7 @@ from telonyx_cinema_bot.services.tmdb import MovieMetadata
 
 class MovieProvider(Protocol):
     async def search_best_match(self, title: str) -> MovieMetadata | None: ...
+    async def fetch_movie(self, tmdb_id: int) -> MovieMetadata: ...
 
 
 class Copywriter(Protocol):
@@ -42,10 +43,6 @@ class TelegramPublisher(Protocol):
     async def publish_text(self, text: str) -> int: ...
 
 
-class PollReader(Protocol):
-    async def poll_votes(self, poll_id: str, poll_message_id: int | None) -> list[int] | None: ...
-
-
 class ContentService:
     def __init__(
         self,
@@ -57,8 +54,12 @@ class ContentService:
         self.movie_provider = movie_provider
         self.copywriter = copywriter
 
-    async def submit(self, tiktok_url: str, title: str, admin_user_id: int) -> Draft:
-        movie = await self.movie_provider.search_best_match(title)
+    async def submit(self, tiktok_url: str, title: str, admin_user_id: int, tmdb_id: int | None = None) -> Draft:
+        if tmdb_id:
+            movie = await self.movie_provider.fetch_movie(tmdb_id)
+        else:
+            movie = await self.movie_provider.search_best_match(title)
+        
         if movie is None:
             raise ValueError(f"TMDb не нашёл фильм: {title}")
 
@@ -156,7 +157,6 @@ class ContentService:
     async def create_recommendation(
         self,
         publisher: TelegramPublisher,
-        poll_reader: PollReader,
         local_date: date,
     ) -> DailyRecommendation | None:
         existing = await self.session.scalar(
@@ -169,7 +169,7 @@ class ContentService:
         if digest is None:
             return None
 
-        winner = await self._select_winner(digest, poll_reader)
+        winner = await self._select_winner(digest)
         if winner is None:
             return None
 
@@ -219,28 +219,40 @@ class ContentService:
             raise ValueError(f"Черновик {draft_id} не найден")
         return draft
 
-    async def _select_winner(self, digest: DailyDigest, poll_reader: PollReader) -> Film | None:
-        votes = None
-        if digest.poll_id:
-            votes = await poll_reader.poll_votes(digest.poll_id, digest.poll_message_id)
-
+    async def _select_winner(self, digest: DailyDigest) -> Film | None:
         options = list(digest.poll_options)
-        if votes:
-            for index, vote_count in enumerate(votes):
-                if index < len(options):
-                    options[index]["votes"] = vote_count
 
         if not options:
             return None
 
-        winner_option = max(
-            enumerate(options),
-            key=lambda item: (
-                item[1].get("votes", 0),
-                -item[0],
-            ),
-        )[1]
+        # Fetch films and published posts for sorting
+        film_ids = [opt["film_id"] for opt in options]
+        result = await self.session.execute(
+            select(Film, PublishedPost)
+            .join(PublishedPost, PublishedPost.film_id == Film.id)
+            .where(Film.id.in_(film_ids))
+        )
+        film_data = {f.id: (f, p) for f, p in result.all()}
+
+        def sort_key(item: tuple[int, dict]) -> tuple:
+            idx, opt = item
+            f, p = film_data.get(opt["film_id"], (None, None))
+            votes_count = opt.get("votes", 0)
+            rating = 0.0
+            if f and f.imdb_rating:
+                try:
+                    rating = float(f.imdb_rating)
+                except ValueError:
+                    pass
+            published_at = p.published_at if p else datetime.min
+            # 1. Votes, 2. Rating, 3. Most recently published (descending order), 4. First in list
+            return (votes_count, rating, published_at.timestamp(), -idx)
+
+        winner_option = max(enumerate(options), key=sort_key)[1]
         winner_film_id = winner_option["film_id"]
+        f, p = film_data.get(winner_film_id, (None, None))
+        if f:
+            return f
         return await self.session.get(Film, winner_film_id)
 
     async def _recommendations_for(self, winner: Film) -> list[MovieMetadata]:

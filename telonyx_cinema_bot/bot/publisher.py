@@ -42,6 +42,3 @@ class AiogramPublisher:
         return message.message_id
 
 
-class TelegramPollReader:
-    async def poll_votes(self, poll_id: str, poll_message_id: int | None) -> list[int] | None:
-        return None

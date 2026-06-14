@@ -13,6 +13,9 @@ from telonyx_cinema_bot.services.tmdb import MovieMetadata
 class FakeMovieProvider:
     async def search_best_match(self, title: str) -> MovieMetadata | None:
         return make_movie(title=title)
+        
+    async def fetch_movie(self, tmdb_id: int) -> MovieMetadata:
+        return make_movie()
 
 
 class FakeCopywriter:
@@ -40,14 +43,6 @@ class FakePublisher:
     def _message_id(self) -> int:
         self.next_message_id += 1
         return self.next_message_id
-
-
-class FakePollReader:
-    def __init__(self, votes: list[int] | None) -> None:
-        self.votes = votes
-
-    async def poll_votes(self, poll_id: str, poll_message_id: int | None) -> list[int] | None:
-        return self.votes
 
 
 @pytest.fixture
@@ -93,7 +88,6 @@ async def test_submit_approve_digest_and_recommendation_flow(session_factory) ->
             service = ContentService(session, FakeMovieProvider(), FakeCopywriter())
             recommendation = await service.create_recommendation(
                 publisher,
-                FakePollReader([3]),
                 today,
             )
             assert recommendation is not None
@@ -129,7 +123,6 @@ async def test_poll_votes_are_persisted_and_used(session_factory) -> None:
             await service.update_poll_votes("poll-1", [1, 5])
             recommendation = await service.create_recommendation(
                 publisher,
-                FakePollReader(None),
                 today,
             )
             winner = await session.get(Film, recommendation.winner_film_id)

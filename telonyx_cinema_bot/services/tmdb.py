@@ -116,7 +116,7 @@ def _extract_year(value: str | None) -> int | None:
 
 
 def _extract_imdb_rating(payload: dict[str, Any]) -> str | None:
-    rating = payload.get("imdb_rating")
-    if rating is None:
+    rating = payload.get("vote_average")
+    if rating is None or rating == 0:
         return None
-    return str(rating)
+    return f"{rating:.1f}"

@@ -5,7 +5,7 @@ from datetime import datetime
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from telonyx_cinema_bot.bot.publisher import AiogramPublisher, TelegramPollReader
+from telonyx_cinema_bot.bot.publisher import AiogramPublisher
 from telonyx_cinema_bot.config import Settings
 from telonyx_cinema_bot.services.content import ContentService
 
@@ -51,11 +51,12 @@ async def _run_digest(settings, session_factory, publisher, movie_provider, copy
 
 
 async def _run_recommendation(settings, session_factory, publisher, movie_provider, copywriter) -> None:
-    local_date = datetime.now(settings.zoneinfo).date()
+    from datetime import timedelta
+    local_date = datetime.now(settings.zoneinfo).date() - timedelta(days=1)
     async with session_factory() as session:
         async with session.begin():
             service = ContentService(session, movie_provider, copywriter)
-            await service.create_recommendation(publisher, TelegramPollReader(), local_date)
+            await service.create_recommendation(publisher, local_date)
 
 
 def _parse_time(value: str) -> tuple[int, int]:

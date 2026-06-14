@@ -24,8 +24,11 @@ def build_film_card(
         escape(emotional_description),
     ]
 
+    if movie.genres:
+        lines.extend(["", f"<b>Жанр:</b> {escape(', '.join(movie.genres[:3]))}"])
+
     if movie.imdb_rating:
-        lines.extend(["", f"IMDb: <b>{escape(movie.imdb_rating)}</b>"])
+        lines.extend(["", f"TMDb: <b>{escape(movie.imdb_rating)}</b>"])
 
     similar_titles = _similar_titles(movie)
     if similar_titles:
