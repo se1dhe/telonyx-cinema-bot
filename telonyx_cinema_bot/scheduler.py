@@ -48,6 +48,18 @@ def configure_scheduler(
         _run_poll, "cron", hour=10, minute=0,
         args=common_args, id="campaign_poll", replace_existing=True,
     )
+    
+    # News scraper runs every few hours
+    scheduler.add_job(
+        _run_news_scraper, "cron", hour="8,14,20", minute=30,
+        args=[settings, session_factory], id="news_scraper", replace_existing=True,
+    )
+    
+    # News publisher fills gaps
+    scheduler.add_job(
+        _run_news_publisher, "cron", hour="12,13,15,16,18,19,21", minute=0,
+        args=common_args, id="news_publisher", replace_existing=True,
+    )
     return scheduler
 
 
@@ -95,3 +107,46 @@ async def _run_poll(settings: Settings, session_factory, publisher: AiogramPubli
         async with session.begin():
             svc = CampaignPublisherService(session, publisher)
             await svc.publish_poll(yesterday)
+
+async def _run_news_scraper(settings: Settings, session_factory) -> None:
+    logger.info("Running news scraper")
+    from telonyx_cinema_bot.services.news import NewsService
+    from telonyx_cinema_bot.services.gemini import GeminiCopywriter
+    from aiogram import Bot
+    
+    async with session_factory() as session:
+        async with session.begin():
+            svc = NewsService(session, GeminiCopywriter(settings.gemini_api_key))
+            count = await svc.fetch_and_prepare_news()
+            
+            if count > 0:
+                bot = Bot(token=settings.bot_token)
+                try:
+                    for admin_id in settings.admin_user_ids:
+                        try:
+                            await bot.send_message(
+                                chat_id=admin_id,
+                                text=f"🗞 Найдено {count} новых новостей! Зайдите в меню модерации."
+                            )
+                        except Exception as e:
+                            logger.error(f"Failed to notify admin {admin_id}: {e}")
+                finally:
+                    await bot.session.close()
+
+async def _run_news_publisher(settings: Settings, session_factory, publisher: AiogramPublisher) -> None:
+    logger.info("Running news publisher to fill the gap")
+    from telonyx_cinema_bot.services.news import NewsService
+    from telonyx_cinema_bot.services.gemini import GeminiCopywriter
+    
+    async with session_factory() as session:
+        async with session.begin():
+            svc = NewsService(session, GeminiCopywriter(settings.gemini_api_key))
+            post = await svc.get_next_approved_news()
+            if post:
+                try:
+                    msg_id = await publisher.publish_text(post.text)
+                    post.published_msg_id = msg_id
+                    from telonyx_cinema_bot.models import NewsStatus
+                    post.status = NewsStatus.published
+                except Exception as e:
+                    logger.error(f"Failed to publish news {post.id}: {e}")

@@ -28,10 +28,11 @@ def _main_menu() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [
                 InlineKeyboardButton(text="🎬 Отправить фильм", callback_data="menu:submit"),
-                InlineKeyboardButton(text="📰 Опубликовать новость", callback_data="menu:news"),
+                InlineKeyboardButton(text="📰 Опубликовать (руками)", callback_data="menu:news"),
             ],
             [
-                InlineKeyboardButton(text="📋 Черновики на модерации", callback_data="menu:pending"),
+                InlineKeyboardButton(text="📋 Черновики фильмов", callback_data="menu:pending"),
+                InlineKeyboardButton(text="🗞 Модерация новостей", callback_data="menu:news_pending"),
             ],
             [
                 InlineKeyboardButton(text="⚙️ Статус очереди", callback_data="menu:queue_status"),
@@ -304,6 +305,88 @@ def build_router(
                 reply_markup=_main_menu(),
             )
         await callback.answer()
+
+    # ── pending news drafts ─────────────────────────────────────────────
+
+    @router.callback_query(F.data == "menu:news_pending")
+    async def cb_news_pending(callback: CallbackQuery) -> None:
+        if not _is_admin_cb(callback):
+            return
+
+        from telonyx_cinema_bot.services.news import NewsService
+        from telonyx_cinema_bot.services.gemini import GeminiCopywriter
+
+        async with session_factory() as session:
+            news_svc = NewsService(session, GeminiCopywriter(settings.gemini_api_key))
+            news_drafts = await news_svc.get_pending_news()
+
+        if not news_drafts:
+            if callback.message:
+                await callback.message.edit_text(
+                    "📭 Новых сгенерированных новостей нет.",
+                    reply_markup=_main_menu(),
+                )
+            await callback.answer()
+            return
+
+        if callback.message:
+            await callback.message.delete()
+
+        for nd in news_drafts:
+            kb = InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(text="✅ В очередь", callback_data=f"news_draft:approve:{nd.id}"),
+                        InlineKeyboardButton(text="🗑 Удалить", callback_data=f"news_draft:reject:{nd.id}")
+                    ]
+                ]
+            )
+            if callback.message:
+                await callback.message.answer(
+                    f"🗞 <b>Новость #{nd.id}</b>\n\n{nd.text}",
+                    reply_markup=kb,
+                    parse_mode=ParseMode.HTML,
+                    disable_web_page_preview=True
+                )
+
+        if callback.message:
+            await callback.message.answer(
+                f"Всего новостей на модерации: <b>{len(news_drafts)}</b>",
+                parse_mode=ParseMode.HTML,
+                reply_markup=_main_menu(),
+            )
+        await callback.answer()
+
+    @router.callback_query(lambda cb: cb.data and cb.data.startswith("news_draft:"))
+    async def cb_news_draft_action(callback: CallbackQuery) -> None:
+        if not _is_admin_cb(callback):
+            return
+        
+        parts = callback.data.split(":")
+        action, news_id = parts[1], int(parts[2])
+
+        from telonyx_cinema_bot.services.news import NewsService
+        from telonyx_cinema_bot.services.gemini import GeminiCopywriter
+
+        try:
+            async with session_factory() as session:
+                async with session.begin():
+                    news_svc = NewsService(session, GeminiCopywriter(settings.gemini_api_key))
+                    if action == "approve":
+                        await news_svc.approve_news(news_id)
+                        status_text = f"✅ Новость #{news_id} добавлена в очередь."
+                    elif action == "reject":
+                        await news_svc.reject_news(news_id)
+                        status_text = f"🗑 Новость #{news_id} отклонена."
+                    else:
+                        return
+        except Exception as exc:
+            await callback.answer(str(exc), show_alert=True)
+            return
+
+        if callback.message:
+            await callback.message.edit_text(status_text, reply_markup=None)
+        await callback.answer(status_text)
 
     # ── approve / reject via inline buttons ─────────────────────────────
 

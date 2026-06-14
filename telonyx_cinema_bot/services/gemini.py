@@ -39,6 +39,45 @@ class GeminiCopywriter:
         response = await self.client.aio.models.generate_content(model=self.model, contents=prompt)
         return (response.text or "").strip()
 
+    async def filter_news(self, news_items: list[dict[str, str]]) -> list[int]:
+        """Returns a list of IDs of news items that are worth publishing."""
+        if not news_items:
+            return []
+        
+        # Prepare list for prompt
+        items_str = ""
+        for item in news_items:
+            items_str += f"ID: {item['id']} | TITLE: {item['title']} | DESC: {item['description']}\n"
+            
+        prompt = (
+            "You are a professional cinema news editor. Here is a list of recent news articles.\n"
+            "Task: Select the most important, unique, and interesting news. Ignore cheap gossip, clickbait, and duplicates (if two articles are about the exact same thing, pick one).\n"
+            "Return ONLY a comma-separated list of IDs you selected. Do not write anything else.\n"
+            f"Articles:\n{items_str}"
+        )
+        try:
+            response = await self.client.aio.models.generate_content(model=self.model, contents=prompt)
+            text = (response.text or "").strip()
+            # Extract IDs
+            selected_ids = []
+            import re
+            for match in re.finditer(r'\d+', text):
+                selected_ids.append(int(match.group()))
+            return selected_ids
+        except Exception:
+            return [item['id'] for item in news_items[:3]]  # Fallback to first 3
+
+    async def generate_news_post(self, article: dict[str, str]) -> str:
+        prompt = (
+            "Напиши новостной пост для Telegram-канала о кино на русском языке.\n"
+            "Стиль: серьезный, информативный, без дешевых заигрываний ('Привет, киноманы'). Можно использовать пару тематических эмодзи.\n"
+            f"Оригинальный заголовок: {article.get('title')}\n"
+            f"Описание: {article.get('description')}\n"
+            "Сделай пост кратким (до 100 слов), с привлекательным заголовком."
+        )
+        response = await self.client.aio.models.generate_content(model=self.model, contents=prompt)
+        return (response.text or "").strip()
+
 
 class FallbackCopywriter:
     async def generate_review(self, movie: MovieMetadata) -> str:

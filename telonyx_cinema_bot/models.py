@@ -124,11 +124,29 @@ class Campaign(Base):
     draft: Mapped[Draft] = relationship(back_populates="campaign")
 
 
+class NewsStatus(str, enum.Enum):
+    pending = "pending"
+    approved = "approved"
+    rejected = "rejected"
+    published = "published"
+
+
+class NewsUrl(Base):
+    __tablename__ = "news_urls"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    url: Mapped[str] = mapped_column(String(512), unique=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class NewsPost(Base):
     __tablename__ = "news_posts"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     text: Mapped[str] = mapped_column(Text)
     photo_file_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    
+    status: Mapped[NewsStatus] = mapped_column(Enum(NewsStatus), default=NewsStatus.pending)
+    scheduled_for: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     published_msg_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
