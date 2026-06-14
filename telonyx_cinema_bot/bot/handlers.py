@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from aiogram import Bot, Router, F
 from aiogram.enums import ParseMode
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, StateFilter
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, Poll
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from sqlalchemy.ext.asyncio import async_sessionmaker
@@ -26,17 +27,11 @@ class SubmitNewsStates(StatesGroup):
 def _main_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [
-                InlineKeyboardButton(text="🎬 Отправить фильм", callback_data="menu:submit"),
-                InlineKeyboardButton(text="📰 Опубликовать (руками)", callback_data="menu:news"),
-            ],
-            [
-                InlineKeyboardButton(text="📋 Черновики фильмов", callback_data="menu:pending"),
-                InlineKeyboardButton(text="🗞 Модерация новостей", callback_data="menu:news_pending"),
-            ],
-            [
-                InlineKeyboardButton(text="⚙️ Статус очереди", callback_data="menu:queue_status"),
-            ]
+            [InlineKeyboardButton(text="🎬 Отправить фильм", callback_data="menu:submit")],
+            [InlineKeyboardButton(text="📰 Опубликовать (руками)", callback_data="menu:news")],
+            [InlineKeyboardButton(text="📋 Черновики фильмов", callback_data="menu:pending")],
+            [InlineKeyboardButton(text="🗞 Модерация новостей", callback_data="menu:news_pending")],
+            [InlineKeyboardButton(text="⚙️ Статус очереди", callback_data="menu:queue_status")],
         ]
     )
 
@@ -44,7 +39,8 @@ def _main_menu() -> InlineKeyboardMarkup:
 def _cancel_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="❌ Отмена", callback_data="menu:cancel")]
+            [InlineKeyboardButton(text="❌ Отмена", callback_data="menu:cancel")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:back")],
         ]
     )
 
@@ -52,10 +48,27 @@ def _cancel_menu() -> InlineKeyboardMarkup:
 def _draft_actions(draft_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [
-                InlineKeyboardButton(text="✅ Одобрить", callback_data=f"draft:approve:{draft_id}"),
-                InlineKeyboardButton(text="❌ Отклонить", callback_data=f"draft:reject:{draft_id}"),
-            ]
+            [InlineKeyboardButton(text="✅ Одобрить", callback_data=f"draft:approve:{draft_id}")],
+            [InlineKeyboardButton(text="❌ Отклонить", callback_data=f"draft:reject:{draft_id}")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:back")],
+        ]
+    )
+
+
+def _news_draft_actions(news_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="✅ В очередь", callback_data=f"news_draft:approve:{news_id}")],
+            [InlineKeyboardButton(text="🗑 Удалить", callback_data=f"news_draft:reject:{news_id}")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:back")],
+        ]
+    )
+
+
+def _back_to_main_menu() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:back")],
         ]
     )
 
@@ -79,6 +92,20 @@ def build_router(
     async def _svc(session) -> ContentService:
         return ContentService(session, movie_provider, copywriter)
 
+    async def _show_main_menu(callback: CallbackQuery, state: FSMContext, text: str) -> None:
+        await state.clear()
+        if not callback.message:
+            return
+
+        try:
+            await callback.message.edit_text(text, reply_markup=_main_menu())
+        except TelegramBadRequest:
+            try:
+                await callback.message.edit_reply_markup(reply_markup=None)
+            except TelegramBadRequest:
+                pass
+            await callback.message.answer(text, reply_markup=_main_menu())
+
     # ── /start  →  main menu ────────────────────────────────────────────
 
     @router.message(Command("start"))
@@ -101,24 +128,14 @@ def build_router(
 
     @router.callback_query(F.data == "menu:cancel")
     async def cb_cancel(callback: CallbackQuery, state: FSMContext) -> None:
-        await state.clear()
-        if callback.message:
-            await callback.message.edit_text(
-                "Действие отменено. Выберите действие:",
-                reply_markup=_main_menu(),
-            )
+        await _show_main_menu(callback, state, "Действие отменено. Выберите действие:")
         await callback.answer()
 
     # ── back to main menu ───────────────────────────────────────────────
 
     @router.callback_query(F.data == "menu:back")
     async def cb_back(callback: CallbackQuery, state: FSMContext) -> None:
-        await state.clear()
-        if callback.message:
-            await callback.message.edit_text(
-                "Выберите действие:",
-                reply_markup=_main_menu(),
-            )
+        await _show_main_menu(callback, state, "Выберите действие:")
         await callback.answer()
 
     # ── submit: step 1 – ask for video ──────────────────────────────────
@@ -192,11 +209,10 @@ def build_router(
 
         confirm_kb = InlineKeyboardMarkup(
             inline_keyboard=[
-                [
-                    InlineKeyboardButton(text="✅ Да, это он", callback_data="submit:confirm_yes"),
-                    InlineKeyboardButton(text="❌ Нет, другой", callback_data="submit:confirm_no"),
-                ],
-                [InlineKeyboardButton(text="❌ Отмена", callback_data="menu:cancel")]
+                [InlineKeyboardButton(text="✅ Да, это он", callback_data="submit:confirm_yes")],
+                [InlineKeyboardButton(text="❌ Нет, другой", callback_data="submit:confirm_no")],
+                [InlineKeyboardButton(text="❌ Отмена", callback_data="menu:cancel")],
+                [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:back")],
             ]
         )
         await message.answer(
@@ -317,7 +333,10 @@ def build_router(
         from telonyx_cinema_bot.services.gemini import GeminiCopywriter
 
         async with session_factory() as session:
-            news_svc = NewsService(session, GeminiCopywriter(settings.gemini_api_key))
+            news_svc = NewsService(
+                session,
+                GeminiCopywriter(settings.gemini_api_key, settings.gemini_model),
+            )
             news_drafts = await news_svc.get_pending_news()
 
         if not news_drafts:
@@ -333,18 +352,10 @@ def build_router(
             await callback.message.delete()
 
         for nd in news_drafts:
-            kb = InlineKeyboardMarkup(
-                inline_keyboard=[
-                    [
-                        InlineKeyboardButton(text="✅ В очередь", callback_data=f"news_draft:approve:{nd.id}"),
-                        InlineKeyboardButton(text="🗑 Удалить", callback_data=f"news_draft:reject:{nd.id}")
-                    ]
-                ]
-            )
             if callback.message:
                 await callback.message.answer(
                     f"🗞 <b>Новость #{nd.id}</b>\n\n{nd.text}",
-                    reply_markup=kb,
+                    reply_markup=_news_draft_actions(nd.id),
                     parse_mode=ParseMode.HTML,
                     disable_web_page_preview=True
                 )
@@ -371,7 +382,10 @@ def build_router(
         try:
             async with session_factory() as session:
                 async with session.begin():
-                    news_svc = NewsService(session, GeminiCopywriter(settings.gemini_api_key))
+                    news_svc = NewsService(
+                        session,
+                        GeminiCopywriter(settings.gemini_api_key, settings.gemini_model),
+                    )
                     if action == "approve":
                         await news_svc.approve_news(news_id)
                         status_text = f"✅ Новость #{news_id} добавлена в очередь."
@@ -385,7 +399,7 @@ def build_router(
             return
 
         if callback.message:
-            await callback.message.edit_text(status_text, reply_markup=None)
+            await callback.message.edit_text(status_text, reply_markup=_back_to_main_menu())
         await callback.answer(status_text)
 
     # ── approve / reject via inline buttons ─────────────────────────────
@@ -419,7 +433,7 @@ def build_router(
             return
 
         if callback.message:
-            await callback.message.edit_text(status_text, reply_markup=None)
+            await callback.message.edit_text(status_text, reply_markup=_back_to_main_menu())
         await callback.answer(status_text)
 
     # ── queue status ──────────────────────────────────────────────────────
@@ -431,8 +445,6 @@ def build_router(
             return
 
         async with session_factory() as session:
-            service = await _svc(session)
-            # Let's count campaigns that are pending (have missing message ids)
             from sqlalchemy import select
             from telonyx_cinema_bot.models import Campaign
             import datetime
@@ -495,7 +507,8 @@ def build_router(
         confirm_kb = InlineKeyboardMarkup(
             inline_keyboard=[
                 [InlineKeyboardButton(text="✅ Опубликовать", callback_data="news:publish")],
-                [InlineKeyboardButton(text="❌ Отмена", callback_data="menu:cancel")]
+                [InlineKeyboardButton(text="❌ Отмена", callback_data="menu:cancel")],
+                [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:back")],
             ]
         )
         await message.copy_to(message.chat.id, reply_markup=confirm_kb)

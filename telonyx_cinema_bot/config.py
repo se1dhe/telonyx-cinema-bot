@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     database_url: str = Field(alias="DATABASE_URL")
     tmdb_api_key: str = Field(alias="TMDB_API_KEY")
     gemini_api_key: str = Field(alias="GEMINI_API_KEY")
+    gemini_model: str = Field(default="gemini-2.5-flash", alias="GEMINI_MODEL")
     timezone: str = Field(default="Europe/Kiev", alias="TIMEZONE")
     digest_time: str = Field(default="22:00", alias="DIGEST_TIME")
     recommendation_time: str = Field(default="10:00", alias="RECOMMENDATION_TIME")

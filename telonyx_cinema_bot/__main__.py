@@ -24,7 +24,7 @@ async def main() -> None:
     bot = Bot(settings.bot_token)
     dispatcher = Dispatcher()
     movie_provider = TMDbClient(settings.tmdb_api_key)
-    copywriter = GeminiCopywriter(settings.gemini_api_key)
+    copywriter = GeminiCopywriter(settings.gemini_api_key, settings.gemini_model)
     publisher = AiogramPublisher(bot, settings.telegram_channel_id)
 
     dispatcher.include_router(
@@ -47,4 +47,3 @@ async def main() -> None:
 
 if __name__ == "__main__":
     asyncio.run(main())
-

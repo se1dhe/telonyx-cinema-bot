@@ -116,7 +116,7 @@ async def _run_news_scraper(settings: Settings, session_factory) -> None:
     
     async with session_factory() as session:
         async with session.begin():
-            svc = NewsService(session, GeminiCopywriter(settings.gemini_api_key))
+            svc = NewsService(session, GeminiCopywriter(settings.gemini_api_key, settings.gemini_model))
             count = await svc.fetch_and_prepare_news()
             
             if count > 0:
@@ -140,7 +140,7 @@ async def _run_news_publisher(settings: Settings, session_factory, publisher: Ai
     
     async with session_factory() as session:
         async with session.begin():
-            svc = NewsService(session, GeminiCopywriter(settings.gemini_api_key))
+            svc = NewsService(session, GeminiCopywriter(settings.gemini_api_key, settings.gemini_model))
             post = await svc.get_next_approved_news()
             if post:
                 try:

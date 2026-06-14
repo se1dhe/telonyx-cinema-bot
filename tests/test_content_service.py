@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from datetime import date
-
 import pytest
 
 from telonyx_cinema_bot.db import create_engine, create_schema, create_session_factory

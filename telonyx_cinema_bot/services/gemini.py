@@ -1,14 +1,24 @@
 from __future__ import annotations
 
+import logging
+import re
+
 from google import genai
 
 from telonyx_cinema_bot.services.tmdb import MovieMetadata
 
+logger = logging.getLogger(__name__)
+
 
 class GeminiCopywriter:
-    def __init__(self, api_key: str) -> None:
+    def __init__(self, api_key: str, model: str = "gemini-2.5-flash") -> None:
         self.client = genai.Client(api_key=api_key)
-        self.model = "gemini-1.5-flash"
+        self.model = model
+        self.fallback = FallbackCopywriter()
+
+    async def _generate_text(self, prompt: str) -> str:
+        response = await self.client.aio.models.generate_content(model=self.model, contents=prompt)
+        return (response.text or "").strip()
 
     async def generate_review(self, movie: MovieMetadata) -> str:
         prompt = (
@@ -16,8 +26,11 @@ class GeminiCopywriter:
             "Не выдумывай факты. До 24 слов. Без эмодзи. "
             f"Фильм: {movie.display_title}. Описание: {movie.overview or 'Нет описания'}."
         )
-        response = await self.client.aio.models.generate_content(model=self.model, contents=prompt)
-        return (response.text or "").strip()
+        try:
+            return await self._generate_text(prompt)
+        except Exception:
+            logger.exception("Gemini failed to generate review with model %s", self.model)
+            return await self.fallback.generate_review(movie)
 
     async def generate_fact(self, movie: MovieMetadata) -> str:
         prompt = (
@@ -25,8 +38,11 @@ class GeminiCopywriter:
             "КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО выдумывать информацию. Используй только общеизвестные факты. "
             f"Фильм: {movie.display_title}."
         )
-        response = await self.client.aio.models.generate_content(model=self.model, contents=prompt)
-        return (response.text or "").strip()
+        try:
+            return await self._generate_text(prompt)
+        except Exception:
+            logger.exception("Gemini failed to generate fact with model %s", self.model)
+            return await self.fallback.generate_fact(movie)
 
 
     async def generate_recommendations(self, movie: MovieMetadata) -> str:
@@ -36,8 +52,11 @@ class GeminiCopywriter:
             f"Фильм: {movie.display_title}. Похожие: {similar}. "
             "Формат: пара предложений (до 30 слов). Без списков и буллитов."
         )
-        response = await self.client.aio.models.generate_content(model=self.model, contents=prompt)
-        return (response.text or "").strip()
+        try:
+            return await self._generate_text(prompt)
+        except Exception:
+            logger.exception("Gemini failed to generate recommendations with model %s", self.model)
+            return await self.fallback.generate_recommendations(movie)
 
     async def filter_news(self, news_items: list[dict[str, str]]) -> list[int]:
         """Returns a list of IDs of news items that are worth publishing."""
@@ -56,15 +75,13 @@ class GeminiCopywriter:
             f"Articles:\n{items_str}"
         )
         try:
-            response = await self.client.aio.models.generate_content(model=self.model, contents=prompt)
-            text = (response.text or "").strip()
-            # Extract IDs
+            text = await self._generate_text(prompt)
             selected_ids = []
-            import re
             for match in re.finditer(r'\d+', text):
                 selected_ids.append(int(match.group()))
             return selected_ids
         except Exception:
+            logger.exception("Gemini failed to filter news with model %s", self.model)
             return [item['id'] for item in news_items[:3]]  # Fallback to first 3
 
     async def generate_news_post(self, article: dict[str, str]) -> str:
@@ -75,8 +92,13 @@ class GeminiCopywriter:
             f"Описание: {article.get('description')}\n"
             "Сделай пост кратким (до 100 слов), с привлекательным заголовком."
         )
-        response = await self.client.aio.models.generate_content(model=self.model, contents=prompt)
-        return (response.text or "").strip()
+        try:
+            return await self._generate_text(prompt)
+        except Exception:
+            logger.exception("Gemini failed to generate news post with model %s", self.model)
+            title = article.get("title") or "Киноновость"
+            description = article.get("description") or ""
+            return f"<b>{title}</b>\n\n{description}".strip()
 
 
 class FallbackCopywriter:

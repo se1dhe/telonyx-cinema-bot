@@ -1,7 +1,7 @@
 import asyncio
 from sqlalchemy import text
 from telonyx_cinema_bot.config import get_settings
-from telonyx_cinema_bot.db import create_engine, create_schema
+from telonyx_cinema_bot.db import create_engine
 
 async def migrate():
     settings = get_settings()
