@@ -17,14 +17,21 @@ def create_session_factory(engine: AsyncEngine) -> async_sessionmaker:
 
 async def create_schema(engine: AsyncEngine) -> None:
     from sqlalchemy import text
-    async with engine.begin() as conn:
-        # Автоматическая миграция: добавим новые колонки, если их нет (для Railway)
+    
+    migrations = [
+        "ALTER TABLE drafts ADD COLUMN IF NOT EXISTS video_file_id VARCHAR(255)",
+        "ALTER TABLE news_posts ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'pending'",
+        "ALTER TABLE news_posts ADD COLUMN IF NOT EXISTS scheduled_for TIMESTAMP WITH TIME ZONE",
+    ]
+    
+    for sql in migrations:
         try:
-            await conn.execute(text("ALTER TABLE news_posts ADD COLUMN IF NOT EXISTS status VARCHAR DEFAULT 'pending'"))
-            await conn.execute(text("ALTER TABLE news_posts ADD COLUMN IF NOT EXISTS scheduled_for TIMESTAMP WITH TIME ZONE"))
-        except Exception as e:
+            async with engine.begin() as conn:
+                await conn.execute(text(sql))
+        except Exception:
             pass
-        
+
+    async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
 

@@ -55,7 +55,7 @@ class Submission(Base):
     video_file_id: Mapped[str] = mapped_column(String(255))
     submitted_title: Mapped[str] = mapped_column(String(255))
     status: Mapped[SubmissionStatus] = mapped_column(
-        Enum(SubmissionStatus), default=SubmissionStatus.pending_match
+        Enum(SubmissionStatus, native_enum=False), default=SubmissionStatus.pending_match
     )
     admin_user_id: Mapped[int] = mapped_column(BigInteger)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -72,7 +72,7 @@ class Draft(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     submission_id: Mapped[int] = mapped_column(ForeignKey("submissions.id"))
     film_id: Mapped[int] = mapped_column(ForeignKey("films.id"))
-    status: Mapped[DraftStatus] = mapped_column(Enum(DraftStatus), default=DraftStatus.pending)
+    status: Mapped[DraftStatus] = mapped_column(Enum(DraftStatus, native_enum=False), default=DraftStatus.pending)
     
     video_file_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     review_text: Mapped[str] = mapped_column(Text)
@@ -145,7 +145,7 @@ class NewsPost(Base):
     text: Mapped[str] = mapped_column(Text)
     photo_file_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     
-    status: Mapped[NewsStatus] = mapped_column(Enum(NewsStatus), default=NewsStatus.pending)
+    status: Mapped[NewsStatus] = mapped_column(Enum(NewsStatus, native_enum=False), default=NewsStatus.pending)
     scheduled_for: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     published_msg_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     
