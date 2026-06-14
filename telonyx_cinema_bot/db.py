@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+import logging
 
+from sqlalchemy import text
+from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 
 from telonyx_cinema_bot.models import Base
+
+logger = logging.getLogger(__name__)
 
 
 def create_engine(database_url: str) -> AsyncEngine:
@@ -16,11 +21,7 @@ def create_session_factory(engine: AsyncEngine) -> async_sessionmaker:
 
 
 async def create_schema(engine: AsyncEngine) -> None:
-    from sqlalchemy import text
-    
     migrations = [
-        # Старая колонка из MVP — убираем NOT NULL чтобы не блокировала вставки
-        "ALTER TABLE submissions ALTER COLUMN tiktok_url DROP NOT NULL",
         "ALTER TABLE submissions ADD COLUMN IF NOT EXISTS video_file_id VARCHAR(255)",
         "ALTER TABLE drafts ADD COLUMN IF NOT EXISTS video_file_id VARCHAR(255)",
         "ALTER TABLE drafts ADD COLUMN IF NOT EXISTS review_text TEXT NOT NULL DEFAULT ''",
@@ -34,23 +35,19 @@ async def create_schema(engine: AsyncEngine) -> None:
         "ALTER TABLE news_posts ADD COLUMN IF NOT EXISTS scheduled_for TIMESTAMP WITH TIME ZONE",
         "CREATE TABLE IF NOT EXISTS news_urls (id SERIAL PRIMARY KEY, url VARCHAR(512) UNIQUE NOT NULL, created_at TIMESTAMPTZ DEFAULT NOW())",
     ]
-    
-    for sql in migrations:
-        try:
-            async with engine.begin() as conn:
-                await conn.execute(text(sql))
-        except Exception:
-            pass
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+    await _drop_legacy_tiktok_not_null(engine)
+    for sql in migrations:
+        async with engine.begin() as conn:
+            await conn.execute(text(sql))
 
     await _clear_legacy_news(engine)
 
 
 async def _clear_legacy_news(engine: AsyncEngine) -> None:
-    from sqlalchemy import text
-
     async def run_once(name: str, statements: list[str]) -> None:
         async with engine.begin() as conn:
             applied = await conn.scalar(
@@ -72,6 +69,17 @@ async def _clear_legacy_news(engine: AsyncEngine) -> None:
         "clear_news_without_images_v1",
         ["DELETE FROM news_posts WHERE image_url IS NULL OR image_url = ''"],
     )
+
+
+async def _drop_legacy_tiktok_not_null(engine: AsyncEngine) -> None:
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(text("ALTER TABLE submissions ALTER COLUMN tiktok_url DROP NOT NULL"))
+    except ProgrammingError as exc:
+        message = str(exc.orig if getattr(exc, "orig", None) else exc)
+        if "tiktok_url" not in message and "UndefinedColumn" not in message:
+            raise
+        logger.info("Legacy submissions.tiktok_url column is absent; skipping NOT NULL migration")
 
 
 async def session_scope(session_factory: async_sessionmaker) -> AsyncIterator:

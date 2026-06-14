@@ -4,6 +4,7 @@ import logging
 import re
 
 from google import genai
+from google.genai import errors
 
 from telonyx_cinema_bot.services.tmdb import MovieMetadata
 
@@ -20,6 +21,39 @@ class GeminiCopywriter:
         response = await self.client.aio.models.generate_content(model=self.model, contents=prompt)
         return (response.text or "").strip()
 
+    def _log_generation_error(self, task: str, exc: Exception) -> None:
+        status_code = getattr(exc, "code", None) or getattr(exc, "status_code", None)
+        if isinstance(exc, errors.ClientError) and status_code == 429:
+            logger.warning("Gemini quota exhausted while generating %s with model %s", task, self.model)
+            return
+        logger.exception("Gemini failed to generate %s with model %s", task, self.model)
+
+    async def generate_campaign_texts(self, movie: MovieMetadata) -> tuple[str, str, str]:
+        similar = ", ".join(m["title"] for m in movie.similar_movies[:3]) or "нет данных"
+        prompt = (
+            "Сгенерируй тексты для Telegram-кампании о фильме на русском языке.\n"
+            "Верни строго 3 строки в формате:\n"
+            "REVIEW: одна короткая эмоциональная строка до 24 слов, без эмодзи\n"
+            "FACT: один осторожный факт или нейтральная фраза без выдуманных деталей\n"
+            "RECS: короткий призыв посмотреть похожие фильмы до 30 слов\n"
+            "Без markdown, HTML и списков.\n"
+            f"Фильм: {movie.display_title}. Описание: {movie.overview or 'Нет описания'}. "
+            f"Похожие: {similar}."
+        )
+        try:
+            text = await self._generate_text(prompt)
+            parsed = _parse_campaign_texts(text)
+            if parsed:
+                return parsed
+        except Exception as exc:
+            self._log_generation_error("campaign texts", exc)
+
+        return (
+            await self.fallback.generate_review(movie),
+            await self.fallback.generate_fact(movie),
+            await self.fallback.generate_recommendations(movie),
+        )
+
     async def generate_review(self, movie: MovieMetadata) -> str:
         prompt = (
             "Напиши одну короткую эмоциональную строку на русском для Telegram-канала о кино. "
@@ -28,8 +62,8 @@ class GeminiCopywriter:
         )
         try:
             return await self._generate_text(prompt)
-        except Exception:
-            logger.exception("Gemini failed to generate review with model %s", self.model)
+        except Exception as exc:
+            self._log_generation_error("review", exc)
             return await self.fallback.generate_review(movie)
 
     async def generate_fact(self, movie: MovieMetadata) -> str:
@@ -40,8 +74,8 @@ class GeminiCopywriter:
         )
         try:
             return await self._generate_text(prompt)
-        except Exception:
-            logger.exception("Gemini failed to generate fact with model %s", self.model)
+        except Exception as exc:
+            self._log_generation_error("fact", exc)
             return await self.fallback.generate_fact(movie)
 
 
@@ -54,8 +88,8 @@ class GeminiCopywriter:
         )
         try:
             return await self._generate_text(prompt)
-        except Exception:
-            logger.exception("Gemini failed to generate recommendations with model %s", self.model)
+        except Exception as exc:
+            self._log_generation_error("recommendations", exc)
             return await self.fallback.generate_recommendations(movie)
 
     async def filter_news(self, news_items: list[dict[str, str]]) -> list[int]:
@@ -80,8 +114,8 @@ class GeminiCopywriter:
             for match in re.finditer(r'\d+', text):
                 selected_ids.append(int(match.group()))
             return selected_ids
-        except Exception:
-            logger.exception("Gemini failed to filter news with model %s", self.model)
+        except Exception as exc:
+            self._log_generation_error("news filter", exc)
             return [item['id'] for item in news_items[:3]]  # Fallback to first 3
 
     async def generate_news_post(self, article: dict[str, str]) -> str:
@@ -95,12 +129,19 @@ class GeminiCopywriter:
         )
         try:
             return await self._generate_text(prompt)
-        except Exception:
-            logger.exception("Gemini failed to generate news post with model %s", self.model)
+        except Exception as exc:
+            self._log_generation_error("news post", exc)
             return (article.get("description") or article.get("title") or "").strip()
 
 
 class FallbackCopywriter:
+    async def generate_campaign_texts(self, movie: MovieMetadata) -> tuple[str, str, str]:
+        return (
+            await self.generate_review(movie),
+            await self.generate_fact(movie),
+            await self.generate_recommendations(movie),
+        )
+
     async def generate_review(self, movie: MovieMetadata) -> str:
         if movie.overview:
             first_sentence = movie.overview.split(".")[0].strip()
@@ -113,3 +154,15 @@ class FallbackCopywriter:
 
     async def generate_recommendations(self, movie: MovieMetadata) -> str:
         return "Если вам понравился этот фильм, обратите внимание на похожие картины."
+
+
+def _parse_campaign_texts(text: str) -> tuple[str, str, str] | None:
+    values: dict[str, str] = {}
+    for line in text.splitlines():
+        key, separator, value = line.partition(":")
+        if separator and key.strip().upper() in {"REVIEW", "FACT", "RECS"}:
+            values[key.strip().upper()] = value.strip()
+
+    if {"REVIEW", "FACT", "RECS"} <= values.keys():
+        return values["REVIEW"], values["FACT"], values["RECS"]
+    return None

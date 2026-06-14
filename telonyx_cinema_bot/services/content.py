@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import datetime
 from typing import Protocol
 
@@ -25,6 +24,7 @@ class MovieProvider(Protocol):
 
 
 class Copywriter(Protocol):
+    async def generate_campaign_texts(self, movie: MovieMetadata) -> tuple[str, str, str]: ...
     async def generate_review(self, movie: MovieMetadata) -> str: ...
     async def generate_fact(self, movie: MovieMetadata) -> str: ...
     async def generate_recommendations(self, movie: MovieMetadata) -> str: ...
@@ -66,11 +66,7 @@ class ContentService:
         self.session.add(submission)
         await self.session.flush()
 
-        review_text, fact_text, recs_text = await asyncio.gather(
-            self.copywriter.generate_review(movie),
-            self.copywriter.generate_fact(movie),
-            self.copywriter.generate_recommendations(movie),
-        )
+        review_text, fact_text, recs_text = await self.copywriter.generate_campaign_texts(movie)
 
         draft = Draft(
             submission_id=submission.id,
