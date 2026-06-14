@@ -20,6 +20,16 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore", populate_by_name=True)
 
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def parse_database_url(cls, value: object) -> str:
+        if isinstance(value, str):
+            if value.startswith("postgres://"):
+                value = value.replace("postgres://", "postgresql://", 1)
+            if value.startswith("postgresql://"):
+                value = value.replace("postgresql://", "postgresql+asyncpg://", 1)
+        return value
+
     @field_validator("admin_user_ids", mode="before")
     @classmethod
     def parse_admin_ids(cls, value: object) -> list[int]:
