@@ -20,8 +20,17 @@ Required environment variables are listed in `.env.example`.
 
 - `/submit <tiktok_url> | <movie title>`
 - `/pending`
-- `/approve <draft_id>`
-- `/reject <draft_id>`
 - `/digest_now`
 - `/recommend_now`
 
+Drafts are reviewed through inline `Publish` / `Reject` buttons. The legacy
+`/approve <draft_id>` and `/reject <draft_id>` commands remain available as a
+fallback for operators.
+
+## Railway
+
+Railway uses `railway.json` and starts the worker with:
+
+```bash
+python -m telonyx_cinema_bot
+```

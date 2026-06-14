@@ -4,6 +4,7 @@ from telonyx_cinema_bot.services.formatting import (
     build_recommendation_text,
 )
 from telonyx_cinema_bot.services.tmdb import MovieMetadata, normalize_movie
+from telonyx_cinema_bot.bot.handlers import _parse_draft_callback
 
 
 def movie(
@@ -84,3 +85,8 @@ def test_digest_and_recommendation_texts_are_stable() -> None:
     assert "If you liked <b>Interstellar (2014)</b>" in recommendation
     assert "- Arrival (2016)" in recommendation
 
+
+def test_draft_callback_parser() -> None:
+    assert _parse_draft_callback("draft:approve:42") == ("approve", 42)
+    assert _parse_draft_callback("draft:reject:42") == ("reject", 42)
+    assert _parse_draft_callback("draft:approve:nope") == (None, None)
