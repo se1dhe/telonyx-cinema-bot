@@ -10,7 +10,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     bot_token: str = Field(alias="BOT_TOKEN")
     telegram_channel_id: str = Field(alias="TELEGRAM_CHANNEL_ID")
-    admin_user_ids: list[int] = Field(alias="ADMIN_USER_IDS")
+    admin_user_ids: list[int] = Field(default_factory=list, alias="ADMIN_USER_IDS")
     database_url: str = Field(alias="DATABASE_URL")
     tmdb_api_key: str = Field(alias="TMDB_API_KEY")
     gemini_api_key: str = Field(alias="GEMINI_API_KEY")
@@ -23,11 +23,16 @@ class Settings(BaseSettings):
     @field_validator("admin_user_ids", mode="before")
     @classmethod
     def parse_admin_ids(cls, value: object) -> list[int]:
+        if value is None or value == "":
+            return []
+        if isinstance(value, int):
+            return [value]
         if isinstance(value, list):
             return [int(item) for item in value]
         if isinstance(value, str):
-            return [int(item.strip()) for item in value.split(",") if item.strip()]
-        raise TypeError("ADMIN_USER_IDS must be a comma-separated string or list")
+            normalized = value.strip().removeprefix("[").removesuffix("]")
+            return [int(item.strip().strip("\"'")) for item in normalized.split(",") if item.strip()]
+        raise ValueError("ADMIN_USER_IDS must be empty, a number, a comma-separated string, or a list")
 
     @property
     def zoneinfo(self) -> ZoneInfo:
@@ -37,4 +42,3 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
-

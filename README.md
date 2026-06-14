@@ -20,6 +20,9 @@ uv run python -m telonyx_cinema_bot
 
 Переменные окружения перечислены в `.env.example`.
 
+`ADMIN_USER_IDS` можно оставить пустым для запуска без админов или указать
+один/несколько Telegram user ID через запятую: `123456789,987654321`.
+
 ## Admin Commands
 
 - `/submit <tiktok_url> | <movie title>`

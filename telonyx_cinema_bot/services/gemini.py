@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-import google.generativeai as genai
+from google import genai
 
 from telonyx_cinema_bot.services.tmdb import MovieMetadata
 
 
 class GeminiCopywriter:
     def __init__(self, api_key: str) -> None:
-        genai.configure(api_key=api_key)
-        self.model = genai.GenerativeModel("gemini-1.5-flash")
+        self.client = genai.Client(api_key=api_key)
+        self.model = "gemini-1.5-flash"
 
     async def emotional_description(self, movie: MovieMetadata) -> str:
         prompt = (
@@ -16,7 +16,7 @@ class GeminiCopywriter:
             "Не выдумывай факты. До 24 слов. Без эмодзи. "
             f"Фильм: {movie.display_title}. Описание: {movie.overview or 'Нет описания'}."
         )
-        response = await self.model.generate_content_async(prompt)
+        response = await self.client.aio.models.generate_content(model=self.model, contents=prompt)
         return (response.text or "").strip()
 
 
