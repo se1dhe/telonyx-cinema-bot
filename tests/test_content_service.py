@@ -124,6 +124,7 @@ async def test_queue_draft_assigns_date_and_approves() -> None:
 
     assert campaign.local_date is not None
     assert campaign.draft_id == draft.id
+    assert campaign.draft is draft
 
 
 async def test_queue_two_drafts_sequential_dates() -> None:

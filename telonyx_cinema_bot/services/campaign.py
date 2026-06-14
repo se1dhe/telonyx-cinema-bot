@@ -3,7 +3,15 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from telonyx_cinema_bot.models import Campaign, Draft, Film
 from telonyx_cinema_bot.bot.publisher import AiogramPublisher
-from telonyx_cinema_bot.services.formatting import format_review, format_fact, format_recommendations, format_poll_options
+from telonyx_cinema_bot.services.formatting import (
+    format_fact,
+    format_poll_options,
+    format_recommended_movie,
+    format_recommendations,
+    format_review,
+    format_video_caption,
+    poster_url_from_path,
+)
 from telonyx_cinema_bot.services.tmdb import MovieMetadata
 
 class CampaignPublisherService:
@@ -37,13 +45,16 @@ class CampaignPublisherService:
 
     async def publish_teaser(self, local_date: date) -> None:
         campaign = await self._get_campaign_for_date(local_date)
+        await self.publish_campaign_teaser(campaign)
+
+    async def publish_campaign_teaser(self, campaign: Campaign | None) -> None:
         if not campaign or campaign.teaser_msg_id:
             return
         
         movie = self._metadata_from_film(campaign.draft.film)
         msg_id = await self.publisher.publish_video(
             campaign.draft.video_file_id, 
-            caption=f"🍿 <b>Тизер дня: {movie.display_title}</b>"
+            caption=format_video_caption(movie, campaign.draft.review_text),
         )
         campaign.teaser_msg_id = msg_id
         await self.session.flush()
@@ -68,7 +79,7 @@ class CampaignPublisherService:
         movie = self._metadata_from_film(campaign.draft.film)
         text = format_fact(movie, campaign.draft.fact_text)
         
-        msg_id = await self.publisher.publish_text(text)
+        msg_id = await self.publisher.publish_card(text, movie.poster_url)
         campaign.fact_msg_id = msg_id
         await self.session.flush()
 
@@ -79,8 +90,15 @@ class CampaignPublisherService:
 
         movie = self._metadata_from_film(campaign.draft.film)
         text = format_recommendations(movie, campaign.draft.recommendations_text)
-        
-        msg_id = await self.publisher.publish_text(text)
+
+        cards = [(text, movie.poster_url)]
+        for item in movie.similar_movies[:3]:
+            poster_url = poster_url_from_path(item.get("poster_path"))
+            if poster_url:
+                cards.append((format_recommended_movie(item), poster_url))
+
+        message_ids = await self.publisher.publish_cards(cards)
+        msg_id = message_ids[0]
         campaign.recommendation_msg_id = msg_id
         await self.session.flush()
 

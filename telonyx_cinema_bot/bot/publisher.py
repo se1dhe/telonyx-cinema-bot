@@ -41,6 +41,12 @@ class AiogramPublisher:
         message = await self.bot.send_message(self.channel_id, text, parse_mode=ParseMode.HTML)
         return message.message_id
 
+    async def publish_cards(self, cards: list[tuple[str, str | None]]) -> list[int]:
+        message_ids = []
+        for text, poster_url in cards:
+            message_ids.append(await self.publish_card(text, poster_url))
+        return message_ids
+
     async def publish_news(self, text: str, image_url: str | None = None) -> int:
         if not image_url:
             raise ValueError("News posts require at least one image")

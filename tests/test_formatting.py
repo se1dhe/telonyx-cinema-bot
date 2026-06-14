@@ -4,6 +4,9 @@ from telonyx_cinema_bot.services.formatting import (
     format_recommendations,
     format_poll_options,
     format_news_post,
+    format_recommended_movie,
+    format_video_caption,
+    poster_url_from_path,
 )
 from telonyx_cinema_bot.services.tmdb import MovieMetadata, normalize_movie
 from telonyx_cinema_bot.bot.handlers import _parse_draft_callback
@@ -48,7 +51,16 @@ def test_normalize_movie_extracts_tmdb_metadata() -> None:
             "poster_path": "/her.jpg",
             "genres": [{"name": "Romance"}, {"name": "Science Fiction"}],
             "external_ids": {"imdb_id": "tt1798709"},
-            "similar": {"results": [{"id": 99, "title": "Lost in Translation", "release_date": "2003-09-18"}]},
+            "similar": {
+                "results": [
+                    {
+                        "id": 99,
+                        "title": "Lost in Translation",
+                        "release_date": "2003-09-18",
+                        "poster_path": "/lost.jpg",
+                    }
+                ]
+            },
         }
     )
 
@@ -56,6 +68,7 @@ def test_normalize_movie_extracts_tmdb_metadata() -> None:
     assert normalized.imdb_id == "tt1798709"
     assert normalized.genres == ["Romance", "Science Fiction"]
     assert normalized.similar_movies[0]["title"] == "Lost in Translation"
+    assert normalized.similar_movies[0]["poster_path"] == "/lost.jpg"
 
 
 def test_format_review_includes_title_and_genres() -> None:
@@ -112,3 +125,24 @@ def test_format_news_post_uses_html_and_escapes_source() -> None:
     assert "Spielberg &amp; aliens" in text
     assert "a=1&amp;b=2" in text
     assert "**" not in text
+
+
+def test_format_video_caption_includes_rating_and_overview() -> None:
+    text = format_video_caption(movie(), "A quiet ache.")
+
+    assert "Interstellar (2014)" in text
+    assert "IMDb/TMDb:" in text
+    assert "A team travels" in text
+    assert "A quiet ache." in text
+
+
+def test_format_recommended_movie_and_poster_url() -> None:
+    item = {
+        "title": "Arrival",
+        "release_year": 2016,
+        "overview": "First contact with language at the center.",
+        "poster_path": "/arrival.jpg",
+    }
+
+    assert "Arrival" in format_recommended_movie(item)
+    assert poster_url_from_path(item["poster_path"]).endswith("/arrival.jpg")

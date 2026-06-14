@@ -115,6 +115,7 @@ class ContentService:
             draft_id=draft.id,
             local_date=next_date,
         )
+        campaign.draft = draft
         self.session.add(campaign)
         await self.session.flush()
         return campaign

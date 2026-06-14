@@ -86,6 +86,7 @@ def normalize_movie(payload: dict[str, Any]) -> MovieMetadata:
             "title": item.get("title") or item.get("name"),
             "release_year": _extract_year(item.get("release_date")),
             "overview": item.get("overview"),
+            "poster_path": item.get("poster_path"),
         }
         for item in payload.get("similar", {}).get("results", [])[:3]
         if item.get("title") or item.get("name")
