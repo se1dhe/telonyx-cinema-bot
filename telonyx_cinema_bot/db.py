@@ -23,6 +23,9 @@ async def create_schema(engine: AsyncEngine) -> None:
         "ALTER TABLE submissions ALTER COLUMN tiktok_url DROP NOT NULL",
         "ALTER TABLE submissions ADD COLUMN IF NOT EXISTS video_file_id VARCHAR(255)",
         "ALTER TABLE drafts ADD COLUMN IF NOT EXISTS video_file_id VARCHAR(255)",
+        "ALTER TABLE drafts ADD COLUMN IF NOT EXISTS review_text TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE drafts ADD COLUMN IF NOT EXISTS fact_text TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE drafts ADD COLUMN IF NOT EXISTS recommendations_text TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE news_posts ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'pending'",
         "ALTER TABLE news_posts ADD COLUMN IF NOT EXISTS scheduled_for TIMESTAMP WITH TIME ZONE",
         "CREATE TABLE IF NOT EXISTS news_urls (id SERIAL PRIMARY KEY, url VARCHAR(512) UNIQUE NOT NULL, created_at TIMESTAMPTZ DEFAULT NOW())",
@@ -43,4 +46,3 @@ async def session_scope(session_factory: async_sessionmaker) -> AsyncIterator:
     async with session_factory() as session:
         async with session.begin():
             yield session
-
