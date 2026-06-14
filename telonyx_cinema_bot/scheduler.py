@@ -144,7 +144,10 @@ async def _run_news_publisher(settings: Settings, session_factory, publisher: Ai
             post = await svc.get_next_approved_news()
             if post:
                 try:
-                    msg_id = await publisher.publish_text(post.text)
+                    from telonyx_cinema_bot.services.formatting import format_news_post
+
+                    text = format_news_post(post.title or "Киноновость", post.text, post.source_url)
+                    msg_id = await publisher.publish_news(text, post.image_url or post.photo_file_id)
                     post.published_msg_id = msg_id
                     from telonyx_cinema_bot.models import NewsStatus
                     post.status = NewsStatus.published

@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from telonyx_cinema_bot.config import Settings
 from telonyx_cinema_bot.services.content import ContentService
+from telonyx_cinema_bot.services.formatting import format_news_post
 
 
 class SubmitMovieStates(StatesGroup):
@@ -353,12 +354,21 @@ def build_router(
 
         for nd in news_drafts:
             if callback.message:
-                await callback.message.answer(
-                    f"🗞 <b>Новость #{nd.id}</b>\n\n{nd.text}",
-                    reply_markup=_news_draft_actions(nd.id),
-                    parse_mode=ParseMode.HTML,
-                    disable_web_page_preview=True
-                )
+                text = format_news_post(nd.title or "Киноновость", nd.text, nd.source_url)
+                if nd.image_url:
+                    await callback.message.answer_photo(
+                        nd.image_url,
+                        caption=text,
+                        reply_markup=_news_draft_actions(nd.id),
+                        parse_mode=ParseMode.HTML,
+                    )
+                else:
+                    await callback.message.answer(
+                        text,
+                        reply_markup=_news_draft_actions(nd.id),
+                        parse_mode=ParseMode.HTML,
+                        disable_web_page_preview=False,
+                    )
 
         if callback.message:
             await callback.message.answer(

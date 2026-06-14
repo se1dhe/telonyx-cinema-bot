@@ -53,3 +53,19 @@ def format_poll_options(movie: MovieMetadata) -> list[str]:
     if not options:
         options = ["Смотрел(а)", "Не смотрел(а)", "Хочу посмотреть"]
     return options
+
+
+def format_news_post(title: str, body: str, source_url: str | None = None) -> str:
+    clean_title = escape(title.strip() or "Киноновость")
+    clean_body = escape(body.strip())
+    if len(clean_body) > 720:
+        clean_body = clean_body[:717].rstrip() + "..."
+
+    lines = [
+        f"🗞 <b>{clean_title}</b>",
+        "",
+        clean_body,
+    ]
+    if source_url:
+        lines.extend(["", f"<a href=\"{escape(source_url, quote=True)}\">Источник</a>"])
+    return "\n".join(line for line in lines if line is not None)

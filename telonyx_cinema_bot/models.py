@@ -142,11 +142,21 @@ class NewsPost(Base):
     __tablename__ = "news_posts"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    title: Mapped[str | None] = mapped_column(String(512), nullable=True)
     text: Mapped[str] = mapped_column(Text)
     photo_file_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    image_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    source_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     
     status: Mapped[NewsStatus] = mapped_column(Enum(NewsStatus, native_enum=False), default=NewsStatus.pending)
     scheduled_for: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     published_msg_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class SchemaMigration(Base):
+    __tablename__ = "schema_migrations"
+
+    name: Mapped[str] = mapped_column(String(255), primary_key=True)
+    applied_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

@@ -41,6 +41,23 @@ class AiogramPublisher:
         message = await self.bot.send_message(self.channel_id, text, parse_mode=ParseMode.HTML)
         return message.message_id
 
+    async def publish_news(self, text: str, image_url: str | None = None) -> int:
+        if image_url:
+            message = await self.bot.send_photo(
+                self.channel_id,
+                image_url,
+                caption=text,
+                parse_mode=ParseMode.HTML,
+            )
+        else:
+            message = await self.bot.send_message(
+                self.channel_id,
+                text,
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=False,
+            )
+        return message.message_id
+
     async def publish_video(self, video_file_id: str, caption: str | None = None) -> int:
         # Check if video_file_id is an actual file id or a url
         if video_file_id.startswith("http"):
@@ -57,5 +74,4 @@ class AiogramPublisher:
                 parse_mode=ParseMode.HTML,
             )
         return message.message_id
-
 

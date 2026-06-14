@@ -86,19 +86,18 @@ class GeminiCopywriter:
 
     async def generate_news_post(self, article: dict[str, str]) -> str:
         prompt = (
-            "Напиши новостной пост для Telegram-канала о кино на русском языке.\n"
-            "Стиль: серьезный, информативный, без дешевых заигрываний ('Привет, киноманы'). Можно использовать пару тематических эмодзи.\n"
+            "Напиши краткий текст новости для Telegram-канала о кино на русском языке.\n"
+            "Верни только основной текст без заголовка, markdown, HTML, списков и ссылок.\n"
+            "Стиль: серьезный, информативный, без дешевых заигрываний ('Привет, киноманы').\n"
             f"Оригинальный заголовок: {article.get('title')}\n"
             f"Описание: {article.get('description')}\n"
-            "Сделай пост кратким (до 100 слов), с привлекательным заголовком."
+            "До 70 слов. Не выдумывай факты и цифры."
         )
         try:
             return await self._generate_text(prompt)
         except Exception:
             logger.exception("Gemini failed to generate news post with model %s", self.model)
-            title = article.get("title") or "Киноновость"
-            description = article.get("description") or ""
-            return f"<b>{title}</b>\n\n{description}".strip()
+            return (article.get("description") or article.get("title") or "").strip()
 
 
 class FallbackCopywriter:

@@ -1,7 +1,7 @@
 import logging
 
 import feedparser
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from telonyx_cinema_bot.models import NewsPost, NewsStatus, NewsUrl
@@ -9,13 +9,42 @@ from telonyx_cinema_bot.services.gemini import GeminiCopywriter
 
 logger = logging.getLogger(__name__)
 
+
+def _entry_image_url(entry) -> str | None:
+    media_content = getattr(entry, "media_content", None) or []
+    for media in media_content:
+        url = media.get("url") if isinstance(media, dict) else None
+        medium = media.get("medium") if isinstance(media, dict) else None
+        if url and (medium in (None, "image") or _looks_like_image(url)):
+            return url
+
+    media_thumbnail = getattr(entry, "media_thumbnail", None) or []
+    for media in media_thumbnail:
+        url = media.get("url") if isinstance(media, dict) else None
+        if url:
+            return url
+
+    links = getattr(entry, "links", None) or []
+    for link in links:
+        href = link.get("href") if isinstance(link, dict) else None
+        link_type = link.get("type") if isinstance(link, dict) else None
+        if href and (str(link_type).startswith("image/") or _looks_like_image(href)):
+            return href
+
+    return None
+
+
+def _looks_like_image(url: str) -> bool:
+    return url.lower().split("?", 1)[0].endswith((".jpg", ".jpeg", ".png", ".webp"))
+
+
 # Fallback parser if Gemini isn't available
 class FallbackNewsCopywriter:
     async def filter_news(self, news_items: list[dict[str, str]]) -> list[int]:
         return [item["id"] for item in news_items[:3]]
 
     async def generate_news_post(self, article: dict[str, str]) -> str:
-        return f"🎬 **Новость**\n\n{article.get('title')}\n\n{article.get('description')}\n\n🔗 Источник: {article.get('link')}"
+        return article.get("description") or article.get("title") or ""
 
 class NewsService:
     def __init__(self, session: AsyncSession, copywriter: GeminiCopywriter | FallbackNewsCopywriter) -> None:
@@ -37,7 +66,8 @@ class NewsService:
                     all_news.append({
                         "title": getattr(entry, "title", ""),
                         "description": getattr(entry, "description", ""),
-                        "link": getattr(entry, "link", "")
+                        "link": getattr(entry, "link", ""),
+                        "image": _entry_image_url(entry),
                     })
             except Exception as e:
                 logger.error(f"Error fetching RSS {url}: {e}")
@@ -71,8 +101,13 @@ class NewsService:
         for item in selected_news:
             try:
                 post_text = await self.copywriter.generate_news_post(item)
-                # Create pending NewsPost
-                post = NewsPost(text=post_text, status=NewsStatus.pending)
+                post = NewsPost(
+                    title=item.get("title"),
+                    text=post_text,
+                    source_url=item.get("link"),
+                    image_url=item.get("image"),
+                    status=NewsStatus.pending,
+                )
                 self.session.add(post)
                 
                 # Mark URL as processed
@@ -90,6 +125,12 @@ class NewsService:
 
         await self.session.commit()
         return generated_count
+
+    async def clear_news_queue(self) -> int:
+        post_result = await self.session.execute(delete(NewsPost))
+        url_result = await self.session.execute(delete(NewsUrl))
+        await self.session.commit()
+        return max(post_result.rowcount or 0, 0) + max(url_result.rowcount or 0, 0)
 
     async def get_pending_news(self) -> list[NewsPost]:
         stmt = select(NewsPost).where(NewsPost.status == NewsStatus.pending)

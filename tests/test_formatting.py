@@ -3,6 +3,7 @@ from telonyx_cinema_bot.services.formatting import (
     format_fact,
     format_recommendations,
     format_poll_options,
+    format_news_post,
 )
 from telonyx_cinema_bot.services.tmdb import MovieMetadata, normalize_movie
 from telonyx_cinema_bot.bot.handlers import _parse_draft_callback
@@ -102,3 +103,12 @@ def test_draft_callback_parser() -> None:
     assert _parse_draft_callback("draft:approve:42") == ("approve", 42)
     assert _parse_draft_callback("draft:reject:42") == ("reject", 42)
     assert _parse_draft_callback("draft:approve:nope") == (None, None)
+
+
+def test_format_news_post_uses_html_and_escapes_source() -> None:
+    text = format_news_post("Disclosure Day", "Spielberg & aliens", "https://example.com/?a=1&b=2")
+
+    assert "<b>Disclosure Day</b>" in text
+    assert "Spielberg &amp; aliens" in text
+    assert "a=1&amp;b=2" in text
+    assert "**" not in text
