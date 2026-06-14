@@ -1,7 +1,8 @@
 import logging
+from datetime import datetime
 
 import feedparser
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from telonyx_cinema_bot.models import NewsPost, NewsStatus, NewsUrl
@@ -57,6 +58,20 @@ class NewsService:
             "https://deadline.com/feed/",
             "https://www.hollywoodreporter.com/feed/"
         ]
+
+    async def has_news_for_date(self, day) -> bool:
+        stmt = (
+            select(func.count(NewsPost.id))
+            .where(NewsPost.status.in_([NewsStatus.approved, NewsStatus.published]))
+            .where(func.date(NewsPost.scheduled_for) == day)
+        )
+        result = await self.session.execute(stmt)
+        return bool(result.scalar())
+
+    async def has_pending_news(self) -> bool:
+        stmt = select(func.count(NewsPost.id)).where(NewsPost.status == NewsStatus.pending)
+        result = await self.session.execute(stmt)
+        return bool(result.scalar())
 
     async def fetch_and_prepare_news(self) -> int:
         """Fetch RSS, filter unique, deduplicate with Gemini, and save as pending drafts."""
@@ -140,13 +155,14 @@ class NewsService:
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
-    async def approve_news(self, post_id: int) -> NewsPost:
+    async def approve_news(self, post_id: int, now: datetime | None = None) -> NewsPost:
         stmt = select(NewsPost).where(NewsPost.id == post_id)
         result = await self.session.execute(stmt)
         post = result.scalar_one_or_none()
         if not post:
             raise ValueError(f"NewsPost {post_id} not found")
         post.status = NewsStatus.approved
+        post.scheduled_for = now or datetime.now()
         await self.session.commit()
         return post
 
@@ -158,13 +174,15 @@ class NewsService:
             post.status = NewsStatus.rejected
             await self.session.commit()
 
-    async def get_next_approved_news(self) -> NewsPost | None:
+    async def get_next_approved_news(self, day=None) -> NewsPost | None:
         stmt = (
             select(NewsPost)
             .where(NewsPost.status == NewsStatus.approved)
             .where(NewsPost.image_url.is_not(None))
             .where(NewsPost.image_url != "")
-            .order_by(NewsPost.created_at)
+            .order_by(NewsPost.scheduled_for, NewsPost.created_at)
         )
+        if day is not None:
+            stmt = stmt.where(func.date(NewsPost.scheduled_for) == day)
         result = await self.session.execute(stmt)
         return result.scalars().first()

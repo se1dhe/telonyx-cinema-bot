@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from datetime import datetime
 
 from telonyx_cinema_bot.models import NewsPost, NewsStatus
 from telonyx_cinema_bot.services.news import NewsService, _entry_image_urls
@@ -33,11 +34,15 @@ class FakeSession:
         self.posts = posts
 
     async def execute(self, statement):
+        text = str(statement)
+        params = statement.compile().params
+        day = params.get("date_1") if "date(news_posts.scheduled_for)" in text else None
         return FakeResult(
             [
                 post
                 for post in self.posts
                 if post.status == NewsStatus.approved and post.image_url
+                and (day is None or post.scheduled_for.date() == day)
             ]
         )
 
@@ -72,6 +77,7 @@ async def test_get_next_approved_news_skips_posts_without_images() -> None:
                     image_url="https://example.com/poster.jpg",
                     image_urls=["https://example.com/poster.jpg"],
                     status=NewsStatus.approved,
+                    scheduled_for=datetime(2026, 6, 14, 12, 0),
                 ),
             ]
         ),
@@ -81,3 +87,32 @@ async def test_get_next_approved_news_skips_posts_without_images() -> None:
 
     assert post is not None
     assert post.title == "With image"
+
+
+async def test_get_next_approved_news_filters_by_day() -> None:
+    service = NewsService(
+        FakeSession(
+            [
+                NewsPost(
+                    title="Yesterday",
+                    text="Body",
+                    image_url="https://example.com/yesterday.jpg",
+                    status=NewsStatus.approved,
+                    scheduled_for=datetime(2026, 6, 13, 12, 0),
+                ),
+                NewsPost(
+                    title="Today",
+                    text="Body",
+                    image_url="https://example.com/today.jpg",
+                    status=NewsStatus.approved,
+                    scheduled_for=datetime(2026, 6, 14, 12, 0),
+                ),
+            ]
+        ),
+        FakeCopywriter(),
+    )
+
+    post = await service.get_next_approved_news(datetime(2026, 6, 14).date())
+
+    assert post is not None
+    assert post.title == "Today"

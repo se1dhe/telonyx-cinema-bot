@@ -402,7 +402,10 @@ def build_router(
                         GeminiCopywriter(settings.gemini_api_key, settings.gemini_model),
                     )
                     if action == "approve":
-                        await news_svc.approve_news(news_id)
+                        await news_svc.approve_news(
+                            news_id,
+                            now=datetime.datetime.now(settings.zoneinfo),
+                        )
                         status_text = f"✅ Новость #{news_id} добавлена в очередь."
                     elif action == "reject":
                         await news_svc.reject_news(news_id)

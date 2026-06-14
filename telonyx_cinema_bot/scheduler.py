@@ -49,9 +49,8 @@ def configure_scheduler(
         args=common_args, id="campaign_poll", replace_existing=True,
     )
     
-    # News scraper runs every few hours
     scheduler.add_job(
-        _run_news_scraper, "cron", hour="8,14,20", minute=30,
+        _run_news_scraper, "interval", minutes=10,
         args=[settings, session_factory], id="news_scraper", replace_existing=True,
     )
     
@@ -109,14 +108,23 @@ async def _run_poll(settings: Settings, session_factory, publisher: AiogramPubli
             await svc.publish_poll(yesterday)
 
 async def _run_news_scraper(settings: Settings, session_factory) -> None:
-    logger.info("Running news scraper")
     from telonyx_cinema_bot.services.news import NewsService
     from telonyx_cinema_bot.services.gemini import GeminiCopywriter
     from aiogram import Bot
+
+    local_date = datetime.now(settings.zoneinfo).date()
+    logger.info("Checking news approval queue for %s", local_date)
     
     async with session_factory() as session:
         async with session.begin():
             svc = NewsService(session, GeminiCopywriter(settings.gemini_api_key, settings.gemini_model))
+            if await svc.has_news_for_date(local_date):
+                logger.info("News for %s is already approved or published", local_date)
+                return
+            if await svc.has_pending_news():
+                logger.info("Pending news already exists; waiting for admin approval")
+                return
+
             count = await svc.fetch_and_prepare_news()
             
             if count > 0:
@@ -141,7 +149,8 @@ async def _run_news_publisher(settings: Settings, session_factory, publisher: Ai
     async with session_factory() as session:
         async with session.begin():
             svc = NewsService(session, GeminiCopywriter(settings.gemini_api_key, settings.gemini_model))
-            post = await svc.get_next_approved_news()
+            local_date = datetime.now(settings.zoneinfo).date()
+            post = await svc.get_next_approved_news(local_date)
             if post:
                 try:
                     from telonyx_cinema_bot.services.formatting import format_news_post
