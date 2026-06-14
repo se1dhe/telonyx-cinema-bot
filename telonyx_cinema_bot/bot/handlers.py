@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import datetime
+
 from aiogram import Bot, Router, F
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramBadRequest
@@ -7,9 +9,12 @@ from aiogram.filters import Command, StateFilter
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
+from sqlalchemy.orm import selectinload
 
 from telonyx_cinema_bot.config import Settings
+from telonyx_cinema_bot.models import Campaign
 from telonyx_cinema_bot.services.content import ContentService
 from telonyx_cinema_bot.services.formatting import format_news_post
 
@@ -455,12 +460,11 @@ def build_router(
             return
 
         async with session_factory() as session:
-            from sqlalchemy import select
-            from telonyx_cinema_bot.models import Campaign
-            import datetime
-            
-            # Simple status: count future campaigns
-            stmt = select(Campaign).where(Campaign.local_date >= datetime.date.today())
+            stmt = (
+                select(Campaign)
+                .where(Campaign.local_date >= datetime.date.today())
+                .options(selectinload(Campaign.draft))
+            )
             result = await session.execute(stmt)
             campaigns = result.scalars().all()
             
