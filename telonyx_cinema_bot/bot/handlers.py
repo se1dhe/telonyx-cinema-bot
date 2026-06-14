@@ -14,9 +14,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from sqlalchemy.orm import selectinload
 
 from telonyx_cinema_bot.config import Settings
-from telonyx_cinema_bot.bot.publisher import AiogramPublisher
 from telonyx_cinema_bot.models import Campaign
-from telonyx_cinema_bot.services.campaign import CampaignPublisherService
 from telonyx_cinema_bot.services.content import ContentService
 from telonyx_cinema_bot.services.formatting import format_news_post
 
@@ -437,13 +435,13 @@ def build_router(
                 async with session.begin():
                     service = await _svc(session)
                     if action == "approve":
-                        campaign = await service.queue_draft(draft_id)
-                        publisher = AiogramPublisher(bot, settings.telegram_channel_id)
-                        campaign_publisher = CampaignPublisherService(session, publisher)
-                        await campaign_publisher.publish_campaign_teaser(campaign)
+                        campaign = await service.queue_draft(
+                            draft_id,
+                            now=datetime.datetime.now(settings.zoneinfo),
+                        )
                         status_text = (
                             f"✅ Кампания #{draft_id} запланирована. "
-                            "Видео с карточкой фильма опубликовано."
+                            f"Видео выйдет {campaign.local_date:%d.%m.%Y} в 11:00."
                         )
                     elif action == "reject":
                         await service.reject(draft_id)

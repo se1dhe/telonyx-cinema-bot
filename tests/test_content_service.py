@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 
 from telonyx_cinema_bot.models import Campaign, Draft, DraftStatus, Film, Submission
 from telonyx_cinema_bot.services.content import ContentService
@@ -120,11 +120,21 @@ async def test_queue_draft_assigns_date_and_approves() -> None:
     service = ContentService(session, FakeMovieProvider(), FakeCopywriter())
     draft = await service.submit("vid_1", "Interstellar", admin_user_id=7)
 
-    campaign = await service.queue_draft(draft.id)
+    campaign = await service.queue_draft(draft.id, now=datetime(2026, 6, 14, 10, 30))
 
-    assert campaign.local_date is not None
+    assert campaign.local_date == date(2026, 6, 14)
     assert campaign.draft_id == draft.id
     assert campaign.draft is draft
+
+
+async def test_queue_draft_after_teaser_time_starts_tomorrow() -> None:
+    session = FakeSession()
+    service = ContentService(session, FakeMovieProvider(), FakeCopywriter())
+    draft = await service.submit("vid_1", "Interstellar", admin_user_id=7)
+
+    campaign = await service.queue_draft(draft.id, now=datetime(2026, 6, 14, 22, 49))
+
+    assert campaign.local_date == date(2026, 6, 15)
 
 
 async def test_queue_two_drafts_sequential_dates() -> None:
@@ -133,11 +143,12 @@ async def test_queue_two_drafts_sequential_dates() -> None:
     d1 = await service.submit("vid_1", "Interstellar", admin_user_id=7)
     d2 = await service.submit("vid_2", "Her", admin_user_id=7)
 
-    c1 = await service.queue_draft(d1.id)
-    c1.local_date = date(2026, 6, 14)
-    c2 = await service.queue_draft(d2.id)
+    c1 = await service.queue_draft(d1.id, now=datetime(2026, 6, 14, 22, 49))
+    c2 = await service.queue_draft(d2.id, now=datetime(2026, 6, 14, 22, 50))
 
     assert c2.local_date > c1.local_date
+    assert c1.local_date == date(2026, 6, 15)
+    assert c2.local_date == date(2026, 6, 16)
 
 
 async def test_reject_draft() -> None:

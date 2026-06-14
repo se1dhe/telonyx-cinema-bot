@@ -91,22 +91,25 @@ class ContentService:
         )
         return list(result.scalars())
 
-    async def queue_draft(self, draft_id: int) -> Campaign:
+    async def queue_draft(self, draft_id: int, now: datetime.datetime | None = None) -> Campaign:
         draft = await self._get_draft(draft_id)
         if draft.status != DraftStatus.pending:
             raise ValueError(f"Черновик {draft_id} уже не на проверке")
 
-        today = datetime.date.today()
+        now = now or datetime.datetime.now()
+        base_date = now.date()
+        if now.time() >= datetime.time(hour=11):
+            base_date += datetime.timedelta(days=1)
 
         max_date_result = await self.session.execute(
             select(func.max(Campaign.local_date))
         )
         max_date = max_date_result.scalar()
 
-        if max_date and max_date >= today:
+        if max_date and max_date >= base_date:
             next_date = max_date + datetime.timedelta(days=1)
         else:
-            next_date = today
+            next_date = base_date
 
         draft.status = DraftStatus.approved
         draft.submission.status = SubmissionStatus.approved
