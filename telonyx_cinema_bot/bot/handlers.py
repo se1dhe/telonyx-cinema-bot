@@ -450,7 +450,10 @@ def build_router(
                     text += f"- {c.local_date.strftime('%d.%m.%Y')}: Фильм #{c.draft.film_id}\n"
 
         if callback.message:
-            await callback.message.edit_text(text, reply_markup=_main_menu(), parse_mode=ParseMode.HTML)
+            try:
+                await callback.message.edit_text(text, reply_markup=_main_menu(), parse_mode=ParseMode.HTML)
+            except Exception:
+                pass
         await callback.answer()
 
 
