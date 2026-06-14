@@ -29,6 +29,21 @@ def build_router(
     async def service_for_session(session) -> ContentService:
         return ContentService(session, movie_provider, copywriter)
 
+    @router.message(Command("start"))
+    async def start(message: Message) -> None:
+        if is_admin(message):
+            await message.answer(
+                "Привет, админ! Доступные команды:\n"
+                "/submit <tiktok_url> | <title> — предложить фильм\n"
+                "/pending — список на модерации\n"
+                "/approve <id> — опубликовать\n"
+                "/reject <id> — отклонить\n"
+                "/digest_now — выпустить дайджест\n"
+                "/recommend_now — выпустить рекомендацию"
+            )
+        else:
+            await message.answer("Привет! Я бот-помощник для Telonyx Cinema. У вас нет прав администратора.")
+
     @router.message(Command("submit"))
     async def submit(message: Message) -> None:
         if not is_admin(message):
