@@ -10,28 +10,30 @@ from telonyx_cinema_bot.services.gemini import GeminiCopywriter
 logger = logging.getLogger(__name__)
 
 
-def _entry_image_url(entry) -> str | None:
+def _entry_image_urls(entry) -> list[str]:
+    urls: list[str] = []
+
     media_content = getattr(entry, "media_content", None) or []
     for media in media_content:
         url = media.get("url") if isinstance(media, dict) else None
         medium = media.get("medium") if isinstance(media, dict) else None
         if url and (medium in (None, "image") or _looks_like_image(url)):
-            return url
+            urls.append(url)
 
     media_thumbnail = getattr(entry, "media_thumbnail", None) or []
     for media in media_thumbnail:
         url = media.get("url") if isinstance(media, dict) else None
         if url:
-            return url
+            urls.append(url)
 
     links = getattr(entry, "links", None) or []
     for link in links:
         href = link.get("href") if isinstance(link, dict) else None
         link_type = link.get("type") if isinstance(link, dict) else None
         if href and (str(link_type).startswith("image/") or _looks_like_image(href)):
-            return href
+            urls.append(href)
 
-    return None
+    return list(dict.fromkeys(urls))
 
 
 def _looks_like_image(url: str) -> bool:
@@ -67,7 +69,7 @@ class NewsService:
                         "title": getattr(entry, "title", ""),
                         "description": getattr(entry, "description", ""),
                         "link": getattr(entry, "link", ""),
-                        "image": _entry_image_url(entry),
+                        "images": _entry_image_urls(entry),
                     })
             except Exception as e:
                 logger.error(f"Error fetching RSS {url}: {e}")
@@ -84,7 +86,7 @@ class NewsService:
         result = await self.session.execute(stmt)
         existing_urls = set(result.scalars().all())
 
-        new_news = [n for n in all_news if n["link"] not in existing_urls]
+        new_news = [n for n in all_news if n["link"] not in existing_urls and n["images"]]
         if not new_news:
             return 0
 
@@ -105,7 +107,8 @@ class NewsService:
                     title=item.get("title"),
                     text=post_text,
                     source_url=item.get("link"),
-                    image_url=item.get("image"),
+                    image_url=item["images"][0],
+                    image_urls=item["images"],
                     status=NewsStatus.pending,
                 )
                 self.session.add(post)
@@ -156,6 +159,12 @@ class NewsService:
             await self.session.commit()
 
     async def get_next_approved_news(self) -> NewsPost | None:
-        stmt = select(NewsPost).where(NewsPost.status == NewsStatus.approved).order_by(NewsPost.created_at)
+        stmt = (
+            select(NewsPost)
+            .where(NewsPost.status == NewsStatus.approved)
+            .where(NewsPost.image_url.is_not(None))
+            .where(NewsPost.image_url != "")
+            .order_by(NewsPost.created_at)
+        )
         result = await self.session.execute(stmt)
         return result.scalars().first()

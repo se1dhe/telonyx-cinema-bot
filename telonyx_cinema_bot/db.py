@@ -28,6 +28,7 @@ async def create_schema(engine: AsyncEngine) -> None:
         "ALTER TABLE drafts ADD COLUMN IF NOT EXISTS recommendations_text TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE news_posts ADD COLUMN IF NOT EXISTS title VARCHAR(512)",
         "ALTER TABLE news_posts ADD COLUMN IF NOT EXISTS image_url VARCHAR(1024)",
+        "ALTER TABLE news_posts ADD COLUMN IF NOT EXISTS image_urls JSON DEFAULT '[]'",
         "ALTER TABLE news_posts ADD COLUMN IF NOT EXISTS source_url VARCHAR(1024)",
         "ALTER TABLE news_posts ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'pending'",
         "ALTER TABLE news_posts ADD COLUMN IF NOT EXISTS scheduled_for TIMESTAMP WITH TIME ZONE",
@@ -50,21 +51,27 @@ async def create_schema(engine: AsyncEngine) -> None:
 async def _clear_legacy_news(engine: AsyncEngine) -> None:
     from sqlalchemy import text
 
-    migration_name = "clear_legacy_news_posts_v1"
-    async with engine.begin() as conn:
-        applied = await conn.scalar(
-            text("SELECT 1 FROM schema_migrations WHERE name = :name"),
-            {"name": migration_name},
-        )
-        if applied:
-            return
+    async def run_once(name: str, statements: list[str]) -> None:
+        async with engine.begin() as conn:
+            applied = await conn.scalar(
+                text("SELECT 1 FROM schema_migrations WHERE name = :name"),
+                {"name": name},
+            )
+            if applied:
+                return
 
-        await conn.execute(text("DELETE FROM news_posts"))
-        await conn.execute(text("DELETE FROM news_urls"))
-        await conn.execute(
-            text("INSERT INTO schema_migrations (name) VALUES (:name)"),
-            {"name": migration_name},
-        )
+            for sql in statements:
+                await conn.execute(text(sql))
+            await conn.execute(
+                text("INSERT INTO schema_migrations (name) VALUES (:name)"),
+                {"name": name},
+            )
+
+    await run_once("clear_legacy_news_posts_v1", ["DELETE FROM news_posts", "DELETE FROM news_urls"])
+    await run_once(
+        "clear_news_without_images_v1",
+        ["DELETE FROM news_posts WHERE image_url IS NULL OR image_url = ''"],
+    )
 
 
 async def session_scope(session_factory: async_sessionmaker) -> AsyncIterator:

@@ -146,6 +146,7 @@ class NewsPost(Base):
     text: Mapped[str] = mapped_column(Text)
     photo_file_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     image_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    image_urls: Mapped[list[str]] = mapped_column(JSON, default=list)
     source_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     
     status: Mapped[NewsStatus] = mapped_column(Enum(NewsStatus, native_enum=False), default=NewsStatus.pending)
