@@ -52,7 +52,7 @@ class Submission(Base):
     __tablename__ = "submissions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    tiktok_url: Mapped[str] = mapped_column(Text)
+    video_file_id: Mapped[str] = mapped_column(String(255))
     submitted_title: Mapped[str] = mapped_column(String(255))
     status: Mapped[SubmissionStatus] = mapped_column(
         Enum(SubmissionStatus), default=SubmissionStatus.pending_match
@@ -73,7 +73,12 @@ class Draft(Base):
     submission_id: Mapped[int] = mapped_column(ForeignKey("submissions.id"))
     film_id: Mapped[int] = mapped_column(ForeignKey("films.id"))
     status: Mapped[DraftStatus] = mapped_column(Enum(DraftStatus), default=DraftStatus.pending)
-    card_text: Mapped[str] = mapped_column(Text)
+    
+    video_file_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    review_text: Mapped[str] = mapped_column(Text)
+    fact_text: Mapped[str] = mapped_column(Text)
+    recommendations_text: Mapped[str] = mapped_column(Text)
+    
     metadata_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
@@ -83,6 +88,7 @@ class Draft(Base):
     film: Mapped[Film] = relationship(back_populates="drafts")
     submission: Mapped[Submission] = relationship(back_populates="drafts")
     published_post: Mapped[PublishedPost | None] = relationship(back_populates="draft")
+    campaign: Mapped[Campaign | None] = relationship(back_populates="draft")
 
 
 class PublishedPost(Base):
@@ -99,26 +105,30 @@ class PublishedPost(Base):
     film: Mapped[Film] = relationship()
 
 
-class DailyDigest(Base):
-    __tablename__ = "daily_digests"
+class Campaign(Base):
+    __tablename__ = "campaigns"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    draft_id: Mapped[int] = mapped_column(ForeignKey("drafts.id"), unique=True)
     local_date: Mapped[date] = mapped_column(Date, unique=True, index=True)
-    included_film_ids: Mapped[list[int]] = mapped_column(JSON, default=list)
-    poll_message_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    
+    teaser_msg_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    review_msg_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    fact_msg_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    recommendation_msg_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    poll_msg_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     poll_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    poll_options: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
+    draft: Mapped[Draft] = relationship(back_populates="campaign")
 
-class DailyRecommendation(Base):
-    __tablename__ = "daily_recommendations"
+
+class NewsPost(Base):
+    __tablename__ = "news_posts"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    local_date: Mapped[date] = mapped_column(Date, unique=True, index=True)
-    winner_film_id: Mapped[int] = mapped_column(ForeignKey("films.id"))
-    recommended_film_ids: Mapped[list[int]] = mapped_column(JSON, default=list)
-    telegram_message_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    text: Mapped[str] = mapped_column(Text)
+    photo_file_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    published_msg_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-
-    winner_film: Mapped[Film] = relationship()

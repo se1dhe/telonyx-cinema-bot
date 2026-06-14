@@ -1,27 +1,15 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from html import escape
 
 from telonyx_cinema_bot.services.tmdb import MovieMetadata
 
 
-@dataclass(frozen=True)
-class DraftCard:
-    text: str
-    metadata_snapshot: dict
-
-
-def build_film_card(
-    movie: MovieMetadata,
-    tiktok_url: str,
-    emotional_description: str,
-    quote: str | None = None,
-) -> DraftCard:
+def format_review(movie: MovieMetadata, review_text: str) -> str:
     lines = [
         f"<b>{escape(movie.display_title)}</b>",
         "",
-        escape(emotional_description),
+        escape(review_text),
     ]
 
     if movie.genres:
@@ -30,51 +18,38 @@ def build_film_card(
     if movie.imdb_rating:
         lines.extend(["", f"TMDb: <b>{escape(movie.imdb_rating)}</b>"])
 
-    similar_titles = _similar_titles(movie)
-    if similar_titles:
-        lines.extend(["", "<b>Похожее настроение:</b>"])
-        lines.extend(f"- {escape(title)}" for title in similar_titles)
+    return "\n".join(lines)
 
-    if quote:
-        lines.extend(["", f"<i>\"{escape(quote)}\"</i>"])
 
-    lines.extend(["", f'<a href="{escape(tiktok_url)}">Источник в TikTok</a>'])
-
-    return DraftCard(
-        text="\n".join(lines),
-        metadata_snapshot={
-            "tmdb_id": movie.tmdb_id,
-            "imdb_id": movie.imdb_id,
-            "display_title": movie.display_title,
-            "similar_movies": movie.similar_movies,
-            "poster_url": movie.poster_url,
-        },
+def format_fact(movie: MovieMetadata, fact_text: str) -> str:
+    return (
+        f"<b>{escape(movie.display_title)}</b>\n\n"
+        f"<i>{escape(fact_text)}</i>"
     )
 
 
-def build_digest_text(movies: list[MovieMetadata]) -> str | None:
-    if not movies:
-        return None
-
-    lines = ["<b>Сегодня в TELONYX CINEMA:</b>", ""]
-    lines.extend(f"- {escape(movie.display_title)}" for movie in movies)
-    lines.extend(["", "Выберите фильм, который станет выбором дня:"])
-    return "\n".join(lines)
-
-
-def build_recommendation_text(winner: MovieMetadata, recommendations: list[MovieMetadata]) -> str:
-    lines = [f"Если вам понравился <b>{escape(winner.display_title)}</b>, посмотрите ещё:", ""]
-    lines.extend(f"- {escape(movie.display_title)}" for movie in recommendations[:3])
-    return "\n".join(lines)
-
-
-def _similar_titles(movie: MovieMetadata) -> list[str]:
-    titles: list[str] = []
+def format_recommendations(movie: MovieMetadata, rec_text: str) -> str:
+    lines = [
+        f"<b>{escape(movie.display_title)}</b>: что посмотреть после?",
+        "",
+        escape(rec_text),
+        "",
+    ]
     for item in movie.similar_movies[:3]:
-        title = item.get("title")
-        year = item.get("release_year")
-        if title and year:
-            titles.append(f"{title} ({year})")
-        elif title:
-            titles.append(title)
-    return titles
+        title = item.get("title", "")
+        year = item.get("release_year", "")
+        if title:
+            lines.append(f"- <b>{escape(title)}</b> ({year})" if year else f"- <b>{escape(title)}</b>")
+    
+    return "\n".join(lines)
+
+
+def format_poll_options(movie: MovieMetadata) -> list[str]:
+    options = []
+    for item in movie.similar_movies[:3]:
+        title = item.get("title", "")
+        if title:
+            options.append(title[:100])
+    if not options:
+        options = ["Смотрел(а)", "Не смотрел(а)", "Хочу посмотреть"]
+    return options

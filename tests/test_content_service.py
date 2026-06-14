@@ -5,7 +5,7 @@ from datetime import date
 import pytest
 
 from telonyx_cinema_bot.db import create_engine, create_schema, create_session_factory
-from telonyx_cinema_bot.models import DraftStatus, Film
+from telonyx_cinema_bot.models import DraftStatus
 from telonyx_cinema_bot.services.content import ContentService
 from telonyx_cinema_bot.services.tmdb import MovieMetadata
 
@@ -13,36 +13,20 @@ from telonyx_cinema_bot.services.tmdb import MovieMetadata
 class FakeMovieProvider:
     async def search_best_match(self, title: str) -> MovieMetadata | None:
         return make_movie(title=title)
-        
+
     async def fetch_movie(self, tmdb_id: int) -> MovieMetadata:
         return make_movie()
 
 
 class FakeCopywriter:
-    async def emotional_description(self, movie: MovieMetadata) -> str:
+    async def generate_review(self, movie: MovieMetadata) -> str:
         return f"{movie.title} звучит одиноко и светло."
 
+    async def generate_fact(self, movie: MovieMetadata) -> str:
+        return f"Факт о {movie.title}: снимали 6 месяцев."
 
-class FakePublisher:
-    def __init__(self) -> None:
-        self.messages: list[tuple[str, str]] = []
-        self.next_message_id = 100
-
-    async def publish_card(self, text: str, poster_url: str | None = None) -> int:
-        self.messages.append(("card", text))
-        return self._message_id()
-
-    async def publish_poll(self, text: str, options: list[str]) -> tuple[int, str | None]:
-        self.messages.append(("poll", text + "\n" + "|".join(options)))
-        return self._message_id(), "poll-1"
-
-    async def publish_text(self, text: str) -> int:
-        self.messages.append(("text", text))
-        return self._message_id()
-
-    def _message_id(self) -> int:
-        self.next_message_id += 1
-        return self.next_message_id
+    async def generate_recommendations(self, movie: MovieMetadata) -> str:
+        return f"Если вам понравился {movie.title}, смотрите похожие."
 
 
 @pytest.fixture
@@ -56,79 +40,62 @@ async def session_factory():
         await engine.dispose()
 
 
-async def test_submit_approve_digest_and_recommendation_flow(session_factory) -> None:
-    publisher = FakePublisher()
-    today = date(2026, 6, 14)
-
+async def test_submit_creates_draft_with_three_texts(session_factory) -> None:
     async with session_factory() as session:
         async with session.begin():
             service = ContentService(session, FakeMovieProvider(), FakeCopywriter())
             draft = await service.submit(
-                "https://www.tiktok.com/@telonyx/video/1",
+                "video_file_id_123",
                 "Interstellar",
                 admin_user_id=7,
             )
             assert draft.status == DraftStatus.pending
-            assert "Interstellar звучит одиноко" in draft.card_text
+            assert "звучит одиноко" in draft.review_text
+            assert "Факт о Interstellar" in draft.fact_text
+            assert "смотрите похожие" in draft.recommendations_text
+            assert draft.video_file_id == "video_file_id_123"
+
+
+async def test_queue_draft_assigns_date_and_approves(session_factory) -> None:
+    async with session_factory() as session:
+        async with session.begin():
+            service = ContentService(session, FakeMovieProvider(), FakeCopywriter())
+            draft = await service.submit("vid_1", "Interstellar", admin_user_id=7)
 
     async with session_factory() as session:
         async with session.begin():
             service = ContentService(session, FakeMovieProvider(), FakeCopywriter())
-            await service.approve(1, publisher, today)
+            campaign = await service.queue_draft(draft.id)
+            assert campaign.local_date is not None
+            assert campaign.draft_id == draft.id
+
+
+async def test_queue_two_drafts_sequential_dates(session_factory) -> None:
+    async with session_factory() as session:
+        async with session.begin():
+            service = ContentService(session, FakeMovieProvider(), FakeCopywriter())
+            d1 = await service.submit("vid_1", "Interstellar", admin_user_id=7)
+            d2 = await service.submit("vid_2", "Her", admin_user_id=7)
 
     async with session_factory() as session:
         async with session.begin():
             service = ContentService(session, FakeMovieProvider(), FakeCopywriter())
-            digest = await service.create_digest(publisher, today)
-            assert digest is not None
-            assert digest.poll_id == "poll-1"
+            c1 = await service.queue_draft(d1.id)
+            c2 = await service.queue_draft(d2.id)
+            assert c2.local_date > c1.local_date
+
+
+async def test_reject_draft(session_factory) -> None:
+    async with session_factory() as session:
+        async with session.begin():
+            service = ContentService(session, FakeMovieProvider(), FakeCopywriter())
+            draft = await service.submit("vid_1", "Interstellar", admin_user_id=7)
 
     async with session_factory() as session:
         async with session.begin():
             service = ContentService(session, FakeMovieProvider(), FakeCopywriter())
-            recommendation = await service.create_recommendation(
-                publisher,
-                today,
-            )
-            assert recommendation is not None
-
-    assert publisher.messages[0][0] == "card"
-    assert publisher.messages[1][0] == "poll"
-    assert publisher.messages[2][0] == "text"
-    assert "Если вам понравился <b>Interstellar (2014)</b>" in publisher.messages[2][1]
-    assert "- Arrival (2016)" in publisher.messages[2][1]
-
-
-async def test_digest_skips_day_without_published_films(session_factory) -> None:
-    async with session_factory() as session:
-        async with session.begin():
-            service = ContentService(session, FakeMovieProvider(), FakeCopywriter())
-            digest = await service.create_digest(FakePublisher(), date(2026, 6, 14))
-
-    assert digest is None
-
-
-async def test_poll_votes_are_persisted_and_used(session_factory) -> None:
-    publisher = FakePublisher()
-    today = date(2026, 6, 14)
-
-    async with session_factory() as session:
-        async with session.begin():
-            service = ContentService(session, FakeMovieProvider(), FakeCopywriter())
-            first = await service.submit("https://tiktok.test/1", "Interstellar", 7)
-            second = await service.submit("https://tiktok.test/2", "Her", 7)
-            await service.approve(first.id, publisher, today)
-            await service.approve(second.id, publisher, today)
-            await service.create_digest(publisher, today)
-            await service.update_poll_votes("poll-1", [1, 5])
-            recommendation = await service.create_recommendation(
-                publisher,
-                today,
-            )
-            winner = await session.get(Film, recommendation.winner_film_id)
-
-    assert recommendation is not None
-    assert winner.title == "Her"
+            rejected = await service.reject(draft.id)
+            assert rejected.status == DraftStatus.rejected
 
 
 def make_movie(title: str = "Interstellar") -> MovieMetadata:

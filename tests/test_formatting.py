@@ -1,7 +1,8 @@
 from telonyx_cinema_bot.services.formatting import (
-    build_digest_text,
-    build_film_card,
-    build_recommendation_text,
+    format_review,
+    format_fact,
+    format_recommendations,
+    format_poll_options,
 )
 from telonyx_cinema_bot.services.tmdb import MovieMetadata, normalize_movie
 from telonyx_cinema_bot.bot.handlers import _parse_draft_callback
@@ -56,34 +57,45 @@ def test_normalize_movie_extracts_tmdb_metadata() -> None:
     assert normalized.similar_movies[0]["title"] == "Lost in Translation"
 
 
-def test_film_card_omits_missing_optional_fields() -> None:
-    card = build_film_card(
-        movie(imdb_rating=None, similar_movies=[]),
-        "https://www.tiktok.com/@telonyx/video/1",
-        "A quiet ache in deep space.",
-    )
+def test_format_review_includes_title_and_genres() -> None:
+    text = format_review(movie(), "A quiet ache in deep space.")
 
-    assert "Interstellar (2014)" in card.text
-    assert "IMDb:" not in card.text
-    assert "Похожее настроение:" not in card.text
-    assert "Источник в TikTok" in card.text
+    assert "Interstellar (2014)" in text
+    assert "Science Fiction" in text
+    assert "8.7" in text
 
 
-def test_digest_skips_empty_day() -> None:
-    assert build_digest_text([]) is None
+def test_format_review_omits_missing_fields() -> None:
+    text = format_review(movie(imdb_rating=None, similar_movies=[]), "A quiet ache.")
+
+    assert "Interstellar (2014)" in text
+    assert "TMDb:" not in text
 
 
-def test_digest_and_recommendation_texts_are_stable() -> None:
-    digest = build_digest_text([movie(), movie("Her", 2, 2013)])
-    recommendation = build_recommendation_text(
-        movie(),
-        [movie("Arrival", 2, 2016), movie("Gravity", 3, 2013), movie("The Martian", 4, 2015)],
-    )
+def test_format_fact_wraps_in_italics() -> None:
+    text = format_fact(movie(), "Снимали на реальной кукурузной ферме.")
 
-    assert "Сегодня в TELONYX CINEMA" in digest
-    assert "- Interstellar (2014)" in digest
-    assert "Если вам понравился <b>Interstellar (2014)</b>" in recommendation
-    assert "- Arrival (2016)" in recommendation
+    assert "<i>" in text
+    assert "кукурузной ферме" in text
+
+
+def test_format_recommendations_lists_similar_films() -> None:
+    text = format_recommendations(movie(), "Если вам понравился, смотрите:")
+
+    assert "Arrival" in text
+    assert "Gravity" in text
+    assert "The Martian" in text
+
+
+def test_format_poll_options_from_similar() -> None:
+    options = format_poll_options(movie())
+    assert len(options) == 3
+    assert options[0] == "Arrival"
+
+
+def test_format_poll_options_fallback() -> None:
+    options = format_poll_options(movie(similar_movies=[]))
+    assert "Смотрел(а)" in options
 
 
 def test_draft_callback_parser() -> None:

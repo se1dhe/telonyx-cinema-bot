@@ -8,27 +8,34 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from telonyx_cinema_bot.bot.publisher import AiogramPublisher
 from telonyx_cinema_bot.config import Settings
 from telonyx_cinema_bot.services.content import ContentService
-from telonyx_cinema_bot.services.dates import local_date_now
 
 
 class SubmitMovieStates(StatesGroup):
-    waiting_for_url = State()
+    waiting_for_video = State()
     waiting_for_title = State()
+    waiting_for_confirmation = State()
+
+
+class SubmitNewsStates(StatesGroup):
+    waiting_for_news = State()
     waiting_for_confirmation = State()
 
 
 def _main_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="📥 Предложить фильм", callback_data="menu:submit")],
-            [InlineKeyboardButton(text="⏳ На модерации", callback_data="menu:pending")],
             [
-                InlineKeyboardButton(text="📰 Дайджест", callback_data="menu:digest"),
-                InlineKeyboardButton(text="🍿 Подборка", callback_data="menu:recommend"),
+                InlineKeyboardButton(text="🎬 Отправить фильм", callback_data="menu:submit"),
+                InlineKeyboardButton(text="📰 Опубликовать новость", callback_data="menu:news"),
             ],
+            [
+                InlineKeyboardButton(text="📋 Черновики на модерации", callback_data="menu:pending"),
+            ],
+            [
+                InlineKeyboardButton(text="⚙️ Статус очереди", callback_data="menu:queue_status"),
+            ]
         ]
     )
 
@@ -45,8 +52,8 @@ def _draft_actions(draft_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="✅ Опубликовать", callback_data=f"draft:approve:{draft_id}"),
-                InlineKeyboardButton(text="🗑 Отклонить", callback_data=f"draft:reject:{draft_id}"),
+                InlineKeyboardButton(text="✅ Одобрить", callback_data=f"draft:approve:{draft_id}"),
+                InlineKeyboardButton(text="❌ Отклонить", callback_data=f"draft:reject:{draft_id}"),
             ]
         ]
     )
@@ -113,36 +120,43 @@ def build_router(
             )
         await callback.answer()
 
-    # ── submit: step 1 – ask for TikTok URL ─────────────────────────────
+    # ── submit: step 1 – ask for video ──────────────────────────────────
 
     @router.callback_query(F.data == "menu:submit")
     async def cb_submit_start(callback: CallbackQuery, state: FSMContext) -> None:
         if not _is_admin_cb(callback):
             await callback.answer("Только для администраторов.", show_alert=True)
             return
-        await state.set_state(SubmitMovieStates.waiting_for_url)
+        await state.set_state(SubmitMovieStates.waiting_for_video)
         if callback.message:
             await callback.message.edit_text(
-                "📎 <b>Шаг 1/2</b>\nОтправьте ссылку на TikTok:",
+                "📎 <b>Шаг 1/2</b>\nЗагрузите видеофайл (MP4) или отправьте ссылку:",
                 parse_mode=ParseMode.HTML,
                 reply_markup=_cancel_menu(),
             )
         await callback.answer()
 
-    # ── submit: step 1 handler – receive URL, ask for title ──────────────
+    # ── submit: step 1 handler – receive video, ask for title ──────────────
 
-    @router.message(StateFilter(SubmitMovieStates.waiting_for_url))
-    async def fsm_receive_url(message: Message, state: FSMContext) -> None:
+    @router.message(StateFilter(SubmitMovieStates.waiting_for_video))
+    async def fsm_receive_video(message: Message, state: FSMContext) -> None:
         if not _is_admin_msg(message):
             return
-        url = (message.text or "").strip()
-        if not url:
+        
+        video_id = None
+        if message.video:
+            video_id = message.video.file_id
+        elif message.text:
+            video_id = message.text.strip()
+            
+        if not video_id:
             await message.answer(
-                "⚠️ Пустое сообщение. Пожалуйста, отправьте ссылку на TikTok:",
+                "⚠️ Пожалуйста, загрузите видео или отправьте ссылку:",
                 reply_markup=_cancel_menu(),
             )
             return
-        await state.update_data(tiktok_url=url)
+            
+        await state.update_data(video_file_id=video_id)
         await state.set_state(SubmitMovieStates.waiting_for_title)
         await message.answer(
             "🎬 <b>Шаг 2/2</b>\nТеперь отправьте название фильма:",
@@ -212,23 +226,25 @@ def build_router(
             return
 
         data = await state.get_data()
-        tiktok_url = data.get("tiktok_url", "")
+        video_file_id = data.get("video_file_id", "")
         title = data.get("title", "")
         tmdb_id = data.get("tmdb_id")
         await state.clear()
 
         if callback.message:
-            await callback.message.edit_text("⏳ Генерирую черновик...")
+            await callback.message.edit_text("⏳ Генерирую кампанию на весь день (это займет немного времени)...")
 
         try:
             async with session_factory() as session:
                 async with session.begin():
                     service = await _svc(session)
-                    draft = await service.submit(tiktok_url, title, callback.from_user.id, tmdb_id=tmdb_id)
+                    draft = await service.submit(video_file_id, title, callback.from_user.id, tmdb_id=tmdb_id)
                     text = (
-                        f"✅ <b>Черновик #{draft.id}</b> создан:\n\n"
-                        f"{draft.card_text}\n\n"
-                        "Проверьте карточку и выберите действие:"
+                        f"✅ <b>Черновик кампании #{draft.id}</b> создан:\n\n"
+                        f"<b>[14:00] Обзор:</b>\n{draft.review_text}\n\n"
+                        f"<b>[17:00] Факт:</b>\n{draft.fact_text}\n\n"
+                        f"<b>[20:00] Подборка:</b>\n{draft.recommendations_text}\n\n"
+                        "Отправить в очередь публикаций?"
                     )
                     if callback.message:
                         await callback.message.answer(
@@ -272,7 +288,10 @@ def build_router(
         for draft in drafts:
             if callback.message:
                 await callback.message.answer(
-                    f"📋 <b>Черновик #{draft.id}</b>\n\n{draft.card_text}",
+                    f"📋 <b>Черновик кампании #{draft.id}</b>\n\n"
+                    f"<b>[14:00] Обзор:</b>\n{draft.review_text}\n\n"
+                    f"<b>[17:00] Факт:</b>\n{draft.fact_text}\n\n"
+                    f"<b>[20:00] Подборка:</b>\n{draft.recommendations_text}\n\n",
                     parse_mode=ParseMode.HTML,
                     disable_web_page_preview=True,
                     reply_markup=_draft_actions(draft.id),
@@ -304,9 +323,8 @@ def build_router(
                 async with session.begin():
                     service = await _svc(session)
                     if action == "approve":
-                        publisher = AiogramPublisher(bot, settings.telegram_channel_id)
-                        await service.approve(draft_id, publisher, local_date_now(settings.zoneinfo))
-                        status_text = f"✅ Черновик #{draft_id} опубликован в канал."
+                        await service.queue_draft(draft_id)
+                        status_text = f"✅ Кампания #{draft_id} добавлена в очередь публикаций."
                     elif action == "reject":
                         await service.reject(draft_id)
                         status_text = f"🗑 Черновик #{draft_id} отклонён."
@@ -321,62 +339,114 @@ def build_router(
             await callback.message.edit_text(status_text, reply_markup=None)
         await callback.answer(status_text)
 
-    # ── digest now ──────────────────────────────────────────────────────
+    # ── queue status ──────────────────────────────────────────────────────
 
-    @router.callback_query(F.data == "menu:digest")
-    async def cb_digest(callback: CallbackQuery, bot: Bot) -> None:
+    @router.callback_query(F.data == "menu:queue_status")
+    async def cb_queue_status(callback: CallbackQuery) -> None:
         if not _is_admin_cb(callback):
             await callback.answer("Только для администраторов.", show_alert=True)
             return
 
-        if callback.message:
-            await callback.message.edit_text("⏳ Формирую дайджест…")
-
         async with session_factory() as session:
-            async with session.begin():
-                service = await _svc(session)
-                publisher = AiogramPublisher(bot, settings.telegram_channel_id)
-                digest = await service.create_digest(publisher, local_date_now(settings.zoneinfo))
+            service = await _svc(session)
+            # Let's count campaigns that are pending (have missing message ids)
+            from sqlalchemy import select
+            from telonyx_cinema_bot.models import Campaign
+            import datetime
+            
+            # Simple status: count future campaigns
+            stmt = select(Campaign).where(Campaign.local_date >= datetime.date.today())
+            result = await session.execute(stmt)
+            campaigns = result.scalars().all()
+            
+            if not campaigns:
+                text = "📭 Очередь пуста. Загрузите новые фильмы!"
+            else:
+                text = f"📅 <b>В очереди {len(campaigns)} кампаний:</b>\n\n"
+                for c in sorted(campaigns, key=lambda x: x.local_date):
+                    text += f"- {c.local_date.strftime('%d.%m.%Y')}: Фильм #{c.draft.film_id}\n"
 
-        text = "📰 Дайджест опубликован!" if digest else "Сегодня фильмов нет, дайджест пропущен."
         if callback.message:
-            await callback.message.edit_text(text, reply_markup=_main_menu())
+            await callback.message.edit_text(text, reply_markup=_main_menu(), parse_mode=ParseMode.HTML)
         await callback.answer()
 
-    # ── recommend now ───────────────────────────────────────────────────
 
-    @router.callback_query(F.data == "menu:recommend")
-    async def cb_recommend(callback: CallbackQuery, bot: Bot) -> None:
+
+
+    # ── news submission ───────────────────────────────────────────────────
+
+    @router.callback_query(F.data == "menu:news")
+    async def cb_news_start(callback: CallbackQuery, state: FSMContext) -> None:
         if not _is_admin_cb(callback):
-            await callback.answer("Только для администраторов.", show_alert=True)
+            return
+        await state.set_state(SubmitNewsStates.waiting_for_news)
+        if callback.message:
+            await callback.message.edit_text(
+                "📰 <b>Отправьте новость</b>\n"
+                "Пришлите текст новости. Если нужно прикрепить фото/видео, отправьте их вместе с подписью.",
+                parse_mode=ParseMode.HTML,
+                reply_markup=_cancel_menu(),
+            )
+        await callback.answer()
+
+    @router.message(StateFilter(SubmitNewsStates.waiting_for_news))
+    async def fsm_receive_news(message: Message, state: FSMContext) -> None:
+        if not _is_admin_msg(message):
             return
 
-        if callback.message:
-            await callback.message.edit_text("⏳ Формирую подборку…")
+        text = message.html_text or message.text or ""
+        if not text and not message.photo and not message.video:
+            await message.answer("⚠️ Пустое сообщение.", reply_markup=_cancel_menu())
+            return
 
-        async with session_factory() as session:
-            async with session.begin():
-                service = await _svc(session)
-                publisher = AiogramPublisher(bot, settings.telegram_channel_id)
-                recommendation = await service.create_recommendation(
-                    publisher,
-                    local_date_now(settings.zoneinfo),
-                )
+        await state.update_data(
+            source_chat_id=message.chat.id,
+            source_message_id=message.message_id,
+            text=text,
+        )
+        await state.set_state(SubmitNewsStates.waiting_for_confirmation)
+        
+        confirm_kb = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="✅ Опубликовать", callback_data="news:publish")],
+                [InlineKeyboardButton(text="❌ Отмена", callback_data="menu:cancel")]
+            ]
+        )
+        await message.copy_to(message.chat.id, reply_markup=confirm_kb)
+        
+    @router.callback_query(StateFilter(SubmitNewsStates.waiting_for_confirmation), F.data == "news:publish")
+    async def fsm_news_publish(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None:
+        if not _is_admin_cb(callback):
+            return
 
-        text = "🍿 Подборка опубликована!" if recommendation else "Дайджест не найден, подборка пропущена."
+        data = await state.get_data()
+        source_chat_id = data.get("source_chat_id")
+        source_message_id = data.get("source_message_id")
+        text_content = data.get("text", "")
+        await state.clear()
+
         if callback.message:
-            await callback.message.edit_text(text, reply_markup=_main_menu())
+            await callback.message.edit_reply_markup(reply_markup=None)
+            await callback.message.answer("⏳ Публикую новость...")
+
+        try:
+            msg_id = await bot.copy_message(
+                chat_id=settings.telegram_channel_id,
+                from_chat_id=source_chat_id,
+                message_id=source_message_id
+            )
+            from telonyx_cinema_bot.models import NewsPost
+            async with session_factory() as session:
+                async with session.begin():
+                    post = NewsPost(text=text_content, published_msg_id=msg_id.message_id)
+                    session.add(post)
+            text_res = "✅ Новость опубликована!"
+        except Exception as exc:
+            text_res = f"❌ Ошибка публикации: {exc}"
+
+        if callback.message:
+            await callback.message.answer(text_res, reply_markup=_main_menu())
         await callback.answer()
-
-    # ── poll vote tracking ──────────────────────────────────────────────
-
-    @router.poll()
-    async def poll_update(poll: Poll) -> None:
-        votes = [option.voter_count for option in poll.options]
-        async with session_factory() as session:
-            async with session.begin():
-                service = await _svc(session)
-                await service.update_poll_votes(poll.id, votes)
 
     return router
 

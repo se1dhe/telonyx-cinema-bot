@@ -41,4 +41,21 @@ class AiogramPublisher:
         message = await self.bot.send_message(self.channel_id, text, parse_mode=ParseMode.HTML)
         return message.message_id
 
+    async def publish_video(self, video_file_id: str, caption: str | None = None) -> int:
+        # Check if video_file_id is an actual file id or a url
+        if video_file_id.startswith("http"):
+            message = await self.bot.send_message(
+                self.channel_id,
+                f"{caption or ''}\n\n<a href='{video_file_id}'>Смотреть видео</a>",
+                parse_mode=ParseMode.HTML,
+            )
+        else:
+            message = await self.bot.send_video(
+                self.channel_id,
+                video_file_id,
+                caption=caption,
+                parse_mode=ParseMode.HTML,
+            )
+        return message.message_id
+
 

@@ -34,8 +34,6 @@ async def main() -> None:
         settings,
         session_factory,
         publisher,
-        movie_provider,
-        copywriter,
     )
     scheduler.start()
 
