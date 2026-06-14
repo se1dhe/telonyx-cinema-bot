@@ -60,7 +60,7 @@ class ContentService:
     async def submit(self, tiktok_url: str, title: str, admin_user_id: int) -> Draft:
         movie = await self.movie_provider.search_best_match(title)
         if movie is None:
-            raise ValueError(f"No TMDb match found for: {title}")
+            raise ValueError(f"TMDb не нашёл фильм: {title}")
 
         film = await self._upsert_film(movie)
         submission = Submission(
@@ -97,7 +97,7 @@ class ContentService:
     async def approve(self, draft_id: int, publisher: TelegramPublisher, local_date: date) -> Draft:
         draft = await self._get_draft(draft_id)
         if draft.status != DraftStatus.pending:
-            raise ValueError(f"Draft {draft_id} is not pending")
+            raise ValueError(f"Черновик {draft_id} уже не на проверке")
 
         message_id = await publisher.publish_card(
             draft.card_text, draft.metadata_snapshot.get("poster_url")
@@ -118,7 +118,7 @@ class ContentService:
     async def reject(self, draft_id: int) -> Draft:
         draft = await self._get_draft(draft_id)
         if draft.status != DraftStatus.pending:
-            raise ValueError(f"Draft {draft_id} is not pending")
+            raise ValueError(f"Черновик {draft_id} уже не на проверке")
         draft.status = DraftStatus.rejected
         draft.submission.status = SubmissionStatus.rejected
         await self.session.flush()
@@ -216,7 +216,7 @@ class ContentService:
             .options(selectinload(Draft.submission), selectinload(Draft.film))
         )
         if draft is None:
-            raise ValueError(f"Draft {draft_id} not found")
+            raise ValueError(f"Черновик {draft_id} не найден")
         return draft
 
     async def _select_winner(self, digest: DailyDigest, poll_reader: PollReader) -> Film | None:
@@ -249,7 +249,7 @@ class ContentService:
             recommendations.append(
                 MovieMetadata(
                     tmdb_id=item.get("tmdb_id") or 0,
-                    title=item.get("title") or "Untitled",
+                    title=item.get("title") or "Без названия",
                     original_title=None,
                     release_year=item.get("release_year"),
                     overview=item.get("overview"),

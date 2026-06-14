@@ -29,13 +29,13 @@ def build_film_card(
 
     similar_titles = _similar_titles(movie)
     if similar_titles:
-        lines.extend(["", "<b>Similar mood:</b>"])
+        lines.extend(["", "<b>Похожее настроение:</b>"])
         lines.extend(f"- {escape(title)}" for title in similar_titles)
 
     if quote:
         lines.extend(["", f"<i>\"{escape(quote)}\"</i>"])
 
-    lines.extend(["", f'<a href="{escape(tiktok_url)}">TikTok source</a>'])
+    lines.extend(["", f'<a href="{escape(tiktok_url)}">Источник в TikTok</a>'])
 
     return DraftCard(
         text="\n".join(lines),
@@ -53,14 +53,14 @@ def build_digest_text(movies: list[MovieMetadata]) -> str | None:
     if not movies:
         return None
 
-    lines = ["<b>Today in TELONYX CINEMA:</b>", ""]
+    lines = ["<b>Сегодня в TELONYX CINEMA:</b>", ""]
     lines.extend(f"- {escape(movie.display_title)}" for movie in movies)
-    lines.extend(["", "Choose the film that becomes the audience pick:"])
+    lines.extend(["", "Выберите фильм, который станет выбором дня:"])
     return "\n".join(lines)
 
 
 def build_recommendation_text(winner: MovieMetadata, recommendations: list[MovieMetadata]) -> str:
-    lines = [f"If you liked <b>{escape(winner.display_title)}</b>, watch these next:", ""]
+    lines = [f"Если вам понравился <b>{escape(winner.display_title)}</b>, посмотрите ещё:", ""]
     lines.extend(f"- {escape(movie.display_title)}" for movie in recommendations[:3])
     return "\n".join(lines)
 
@@ -75,4 +75,3 @@ def _similar_titles(movie: MovieMetadata) -> list[str]:
         elif title:
             titles.append(title)
     return titles
-

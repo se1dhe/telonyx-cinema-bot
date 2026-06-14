@@ -12,9 +12,9 @@ class GeminiCopywriter:
 
     async def emotional_description(self, movie: MovieMetadata) -> str:
         prompt = (
-            "Write one short emotional Telegram line for a cinema channel. "
-            "Do not invent facts. Keep it under 24 words. "
-            f"Movie: {movie.display_title}. Overview: {movie.overview or 'No overview'}."
+            "Напиши одну короткую эмоциональную строку на русском для Telegram-канала о кино. "
+            "Не выдумывай факты. До 24 слов. Без эмодзи. "
+            f"Фильм: {movie.display_title}. Описание: {movie.overview or 'Нет описания'}."
         )
         response = await self.model.generate_content_async(prompt)
         return (response.text or "").strip()
@@ -26,5 +26,4 @@ class FallbackCopywriter:
             first_sentence = movie.overview.split(".")[0].strip()
             if first_sentence:
                 return first_sentence[:180]
-        return "A cinematic mood worth saving for the right night."
-
+        return "Кинонастроение, которое стоит сохранить для правильного вечера."

@@ -30,7 +30,7 @@ class AiogramPublisher:
         await self.bot.send_message(self.channel_id, text, parse_mode=ParseMode.HTML)
         poll_message = await self.bot.send_poll(
             self.channel_id,
-            question="Which film becomes the audience pick?",
+            question="Какой фильм станет выбором дня?",
             options=options,
             is_anonymous=True,
         )
@@ -45,4 +45,3 @@ class AiogramPublisher:
 class TelegramPollReader:
     async def poll_votes(self, poll_id: str, poll_message_id: int | None) -> list[int] | None:
         return None
-

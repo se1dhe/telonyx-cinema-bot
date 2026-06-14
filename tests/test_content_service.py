@@ -17,7 +17,7 @@ class FakeMovieProvider:
 
 class FakeCopywriter:
     async def emotional_description(self, movie: MovieMetadata) -> str:
-        return f"{movie.title} feels lonely and luminous."
+        return f"{movie.title} звучит одиноко и светло."
 
 
 class FakePublisher:
@@ -74,7 +74,7 @@ async def test_submit_approve_digest_and_recommendation_flow(session_factory) ->
                 admin_user_id=7,
             )
             assert draft.status == DraftStatus.pending
-            assert "Interstellar feels lonely" in draft.card_text
+            assert "Interstellar звучит одиноко" in draft.card_text
 
     async with session_factory() as session:
         async with session.begin():
@@ -101,7 +101,7 @@ async def test_submit_approve_digest_and_recommendation_flow(session_factory) ->
     assert publisher.messages[0][0] == "card"
     assert publisher.messages[1][0] == "poll"
     assert publisher.messages[2][0] == "text"
-    assert "If you liked <b>Interstellar (2014)</b>" in publisher.messages[2][1]
+    assert "Если вам понравился <b>Interstellar (2014)</b>" in publisher.messages[2][1]
     assert "- Arrival (2016)" in publisher.messages[2][1]
 
 

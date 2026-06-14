@@ -46,7 +46,7 @@ class TMDbClient:
             search_payload = await self._get(
                 session,
                 "/search/movie",
-                {"query": title, "include_adult": "false", "language": "en-US"},
+                {"query": title, "include_adult": "false", "language": "ru-RU"},
             )
             results = search_payload.get("results", [])
             if not results:
@@ -64,7 +64,7 @@ class TMDbClient:
         payload = await self._get(
             session,
             f"/movie/{tmdb_id}",
-            {"append_to_response": "external_ids,similar", "language": "en-US"},
+            {"append_to_response": "external_ids,similar", "language": "ru-RU"},
         )
         return normalize_movie(payload)
 
@@ -120,4 +120,3 @@ def _extract_imdb_rating(payload: dict[str, Any]) -> str | None:
     if rating is None:
         return None
     return str(rating)
-

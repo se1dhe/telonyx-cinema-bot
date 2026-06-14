@@ -35,12 +35,12 @@ def build_router(
             return
         payload = _command_payload(message.text)
         if not payload or "|" not in payload:
-            await message.answer("Usage: /submit <tiktok_url> | <movie title>")
+            await message.answer("Формат: /submit <ссылка TikTok> | <название фильма>")
             return
 
         tiktok_url, title = [part.strip() for part in payload.split("|", 1)]
         if not tiktok_url or not title:
-            await message.answer("Usage: /submit <tiktok_url> | <movie title>")
+            await message.answer("Формат: /submit <ссылка TikTok> | <название фильма>")
             return
 
         async with session_factory() as session:
@@ -48,8 +48,8 @@ def build_router(
                 service = await service_for_session(session)
                 draft = await service.submit(tiktok_url, title, message.from_user.id)
                 await message.answer(
-                    f"Draft #{draft.id} created:\n\n{draft.card_text}\n\n"
-                    "Review it here before publishing.",
+                    f"Черновик #{draft.id} создан:\n\n{draft.card_text}\n\n"
+                    "Проверьте карточку перед публикацией.",
                     parse_mode=ParseMode.HTML,
                     disable_web_page_preview=True,
                     reply_markup=_draft_actions(draft.id),
@@ -63,12 +63,12 @@ def build_router(
             service = await service_for_session(session)
             drafts = await service.pending_drafts()
         if not drafts:
-            await message.answer("No pending drafts.")
+            await message.answer("Черновиков на проверке нет.")
             return
-        await message.answer(f"Pending drafts: {len(drafts)}")
+        await message.answer(f"Черновиков на проверке: {len(drafts)}")
         for draft in drafts:
             await message.answer(
-                f"Draft #{draft.id}\n\n{draft.card_text}",
+                f"Черновик #{draft.id}\n\n{draft.card_text}",
                 parse_mode=ParseMode.HTML,
                 disable_web_page_preview=True,
                 reply_markup=_draft_actions(draft.id),
@@ -80,14 +80,14 @@ def build_router(
             return
         draft_id = _int_payload(message.text)
         if draft_id is None:
-            await message.answer("Usage: /approve <draft_id>")
+            await message.answer("Формат: /approve <id черновика>")
             return
         async with session_factory() as session:
             async with session.begin():
                 service = await service_for_session(session)
                 publisher = AiogramPublisher(bot, settings.telegram_channel_id)
                 await service.approve(draft_id, publisher, local_date_now(settings.zoneinfo))
-        await message.answer(f"Draft #{draft_id} published.")
+        await message.answer(f"Черновик #{draft_id} опубликован.")
 
     @router.message(Command("reject"))
     async def reject(message: Message) -> None:
@@ -95,23 +95,23 @@ def build_router(
             return
         draft_id = _int_payload(message.text)
         if draft_id is None:
-            await message.answer("Usage: /reject <draft_id>")
+            await message.answer("Формат: /reject <id черновика>")
             return
         async with session_factory() as session:
             async with session.begin():
                 service = await service_for_session(session)
                 await service.reject(draft_id)
-        await message.answer(f"Draft #{draft_id} rejected.")
+        await message.answer(f"Черновик #{draft_id} отклонён.")
 
     @router.callback_query(lambda callback: callback.data and callback.data.startswith("draft:"))
     async def draft_action(callback: CallbackQuery, bot: Bot) -> None:
         if not is_admin_callback(callback):
-            await callback.answer("Admin only.", show_alert=True)
+            await callback.answer("Только для администратора.", show_alert=True)
             return
 
         action, draft_id = _parse_draft_callback(callback.data)
         if action is None or draft_id is None:
-            await callback.answer("Unknown action.", show_alert=True)
+            await callback.answer("Неизвестное действие.", show_alert=True)
             return
 
         try:
@@ -121,12 +121,12 @@ def build_router(
                     if action == "approve":
                         publisher = AiogramPublisher(bot, settings.telegram_channel_id)
                         await service.approve(draft_id, publisher, local_date_now(settings.zoneinfo))
-                        status_text = f"Draft #{draft_id} published."
+                        status_text = f"Черновик #{draft_id} опубликован."
                     elif action == "reject":
                         await service.reject(draft_id)
-                        status_text = f"Draft #{draft_id} rejected."
+                        status_text = f"Черновик #{draft_id} отклонён."
                     else:
-                        await callback.answer("Unknown action.", show_alert=True)
+                        await callback.answer("Неизвестное действие.", show_alert=True)
                         return
         except ValueError as exc:
             await callback.answer(str(exc), show_alert=True)
@@ -146,7 +146,7 @@ def build_router(
                 service = await service_for_session(session)
                 publisher = AiogramPublisher(bot, settings.telegram_channel_id)
                 digest = await service.create_digest(publisher, local_date_now(settings.zoneinfo))
-        await message.answer("Digest posted." if digest else "No films for today; digest skipped.")
+        await message.answer("Дайджест опубликован." if digest else "Сегодня фильмов нет, дайджест пропущен.")
 
     @router.message(Command("recommend_now"))
     async def recommend_now(message: Message, bot: Bot) -> None:
@@ -162,7 +162,7 @@ def build_router(
                     local_date_now(settings.zoneinfo),
                 )
         await message.answer(
-            "Recommendation posted." if recommendation else "No digest found; recommendation skipped."
+            "Подборка опубликована." if recommendation else "Дайджест не найден, подборка пропущена."
         )
 
     @router.poll()
@@ -197,8 +197,8 @@ def _draft_actions(draft_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="Publish", callback_data=f"draft:approve:{draft_id}"),
-                InlineKeyboardButton(text="Reject", callback_data=f"draft:reject:{draft_id}"),
+                InlineKeyboardButton(text="Опубликовать", callback_data=f"draft:approve:{draft_id}"),
+                InlineKeyboardButton(text="Отклонить", callback_data=f"draft:reject:{draft_id}"),
             ]
         ]
     )

@@ -1,10 +1,14 @@
 # TELONYX CINEMA Bot
 
-Telegram MVP with three public formats:
+Telegram-бот для русскоязычного канала TELONYX CINEMA.
 
-- approved TikTok film card
-- 22:00 Europe/Kiev daily digest with a poll
-- 10:00 Europe/Kiev recommendation post based on the poll winner
+Публичные форматы:
+
+- одобренная карточка фильма из TikTok
+- ежедневный дайджест в 22:00 Europe/Kiev с опросом
+- утренняя подборка в 10:00 Europe/Kiev по победителю опроса
+
+Все ответы бота и публикации канала должны быть на русском.
 
 ## Setup
 
@@ -14,7 +18,7 @@ cp .env.example .env
 uv run python -m telonyx_cinema_bot
 ```
 
-Required environment variables are listed in `.env.example`.
+Переменные окружения перечислены в `.env.example`.
 
 ## Admin Commands
 
@@ -23,13 +27,12 @@ Required environment variables are listed in `.env.example`.
 - `/digest_now`
 - `/recommend_now`
 
-Drafts are reviewed through inline `Publish` / `Reject` buttons. The legacy
-`/approve <draft_id>` and `/reject <draft_id>` commands remain available as a
-fallback for operators.
+Черновики проверяются через inline-кнопки `Опубликовать` / `Отклонить`.
+Команды `/approve <draft_id>` и `/reject <draft_id>` остаются fallback-вариантом.
 
 ## Railway
 
-Railway uses `railway.json` and starts the worker with:
+Railway использует `railway.json` и запускает worker командой:
 
 ```bash
 python -m telonyx_cinema_bot

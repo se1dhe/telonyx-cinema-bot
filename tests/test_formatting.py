@@ -65,8 +65,8 @@ def test_film_card_omits_missing_optional_fields() -> None:
 
     assert "Interstellar (2014)" in card.text
     assert "IMDb:" not in card.text
-    assert "Similar mood:" not in card.text
-    assert "TikTok source" in card.text
+    assert "Похожее настроение:" not in card.text
+    assert "Источник в TikTok" in card.text
 
 
 def test_digest_skips_empty_day() -> None:
@@ -80,9 +80,9 @@ def test_digest_and_recommendation_texts_are_stable() -> None:
         [movie("Arrival", 2, 2016), movie("Gravity", 3, 2013), movie("The Martian", 4, 2015)],
     )
 
-    assert "Today in TELONYX CINEMA" in digest
+    assert "Сегодня в TELONYX CINEMA" in digest
     assert "- Interstellar (2014)" in digest
-    assert "If you liked <b>Interstellar (2014)</b>" in recommendation
+    assert "Если вам понравился <b>Interstellar (2014)</b>" in recommendation
     assert "- Arrival (2016)" in recommendation
 
 
