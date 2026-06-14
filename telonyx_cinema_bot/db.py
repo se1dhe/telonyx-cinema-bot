@@ -39,7 +39,8 @@ async def create_schema(engine: AsyncEngine) -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-    await _drop_legacy_tiktok_not_null(engine)
+    await _drop_legacy_not_null(engine, "submissions", "tiktok_url")
+    await _drop_legacy_not_null(engine, "drafts", "card_text")
     for sql in migrations:
         async with engine.begin() as conn:
             await conn.execute(text(sql))
@@ -71,15 +72,22 @@ async def _clear_legacy_news(engine: AsyncEngine) -> None:
     )
 
 
-async def _drop_legacy_tiktok_not_null(engine: AsyncEngine) -> None:
+async def _drop_legacy_not_null(engine: AsyncEngine, table: str, column: str) -> None:
+    allowed_columns = {
+        ("submissions", "tiktok_url"),
+        ("drafts", "card_text"),
+    }
+    if (table, column) not in allowed_columns:
+        raise ValueError(f"Unexpected legacy column migration: {table}.{column}")
+
     try:
         async with engine.begin() as conn:
-            await conn.execute(text("ALTER TABLE submissions ALTER COLUMN tiktok_url DROP NOT NULL"))
+            await conn.execute(text(f"ALTER TABLE {table} ALTER COLUMN {column} DROP NOT NULL"))
     except ProgrammingError as exc:
         message = str(exc.orig if getattr(exc, "orig", None) else exc)
-        if "tiktok_url" not in message and "UndefinedColumn" not in message:
+        if column not in message and "UndefinedColumn" not in message:
             raise
-        logger.info("Legacy submissions.tiktok_url column is absent; skipping NOT NULL migration")
+        logger.info("Legacy %s.%s column is absent; skipping NOT NULL migration", table, column)
 
 
 async def session_scope(session_factory: async_sessionmaker) -> AsyncIterator:
