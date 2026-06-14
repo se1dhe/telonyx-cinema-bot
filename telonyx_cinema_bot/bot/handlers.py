@@ -15,10 +15,11 @@ from telonyx_cinema_bot.services.dates import local_date_now
 
 
 class SubmitMovieStates(StatesGroup):
-    waiting_for_link_and_title = State()
+    waiting_for_url = State()
+    waiting_for_title = State()
 
 
-def get_main_menu() -> InlineKeyboardMarkup:
+def _main_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="📥 Предложить фильм", callback_data="menu:submit")],
@@ -26,15 +27,26 @@ def get_main_menu() -> InlineKeyboardMarkup:
             [
                 InlineKeyboardButton(text="📰 Дайджест", callback_data="menu:digest"),
                 InlineKeyboardButton(text="🍿 Подборка", callback_data="menu:recommend"),
-            ]
+            ],
         ]
     )
 
 
-def get_cancel_menu() -> InlineKeyboardMarkup:
+def _cancel_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="❌ Отмена", callback_data="menu:cancel")]
+        ]
+    )
+
+
+def _draft_actions(draft_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Опубликовать", callback_data=f"draft:approve:{draft_id}"),
+                InlineKeyboardButton(text="🗑 Отклонить", callback_data=f"draft:reject:{draft_id}"),
+            ]
         ]
     )
 
@@ -47,115 +59,178 @@ def build_router(
 ) -> Router:
     router = Router()
 
-    def is_admin(message: Message) -> bool:
+    # ── helpers ──────────────────────────────────────────────────────────
+
+    def _is_admin_msg(message: Message) -> bool:
         return bool(message.from_user and message.from_user.id in settings.admin_user_ids)
 
-    def is_admin_callback(callback: CallbackQuery) -> bool:
+    def _is_admin_cb(callback: CallbackQuery) -> bool:
         return bool(callback.from_user and callback.from_user.id in settings.admin_user_ids)
 
-    async def service_for_session(session) -> ContentService:
+    async def _svc(session) -> ContentService:
         return ContentService(session, movie_provider, copywriter)
 
+    # ── /start  →  main menu ────────────────────────────────────────────
+
     @router.message(Command("start"))
-    async def start(message: Message, state: FSMContext) -> None:
-        if is_admin(message):
-            await state.clear()
+    async def cmd_start(message: Message, state: FSMContext) -> None:
+        await state.clear()
+        if _is_admin_msg(message):
             await message.answer(
-                "Привет, админ! Выберите действие из меню ниже:",
-                reply_markup=get_main_menu()
+                "👋 <b>Привет, админ!</b>\nВыберите действие:",
+                parse_mode=ParseMode.HTML,
+                reply_markup=_main_menu(),
             )
         else:
-            await message.answer("Привет! Я бот-помощник для Telonyx Cinema. У вас нет прав администратора.")
+            await message.answer(
+                "Привет! Я бот-помощник канала <b>Telonyx Cinema</b>.\n"
+                "У вас нет прав администратора.",
+                parse_mode=ParseMode.HTML,
+            )
+
+    # ── cancel (from any FSM state) ─────────────────────────────────────
 
     @router.callback_query(F.data == "menu:cancel")
-    async def cancel_action(callback: CallbackQuery, state: FSMContext) -> None:
-        if not is_admin_callback(callback):
-            return
+    async def cb_cancel(callback: CallbackQuery, state: FSMContext) -> None:
         await state.clear()
-        if callback.message:
-            await callback.message.edit_text("Действие отменено.", reply_markup=get_main_menu())
-
-    @router.callback_query(F.data == "menu:submit")
-    async def submit_start(callback: CallbackQuery, state: FSMContext) -> None:
-        if not is_admin_callback(callback):
-            return
-        await state.set_state(SubmitMovieStates.waiting_for_link_and_title)
         if callback.message:
             await callback.message.edit_text(
-                "Отправьте ссылку на TikTok и название фильма в формате:\n"
-                "`<ссылка> | <название>`",
-                parse_mode=ParseMode.MARKDOWN,
-                reply_markup=get_cancel_menu()
+                "Действие отменено. Выберите действие:",
+                reply_markup=_main_menu(),
             )
+        await callback.answer()
 
-    @router.message(StateFilter(SubmitMovieStates.waiting_for_link_and_title))
-    async def submit_process(message: Message, state: FSMContext) -> None:
-        if not is_admin(message):
-            return
-        
-        payload = message.text
-        if not payload or "|" not in payload:
-            await message.answer(
-                "Неверный формат. Пожалуйста, используйте:\n`<ссылка> | <название>`",
-                parse_mode=ParseMode.MARKDOWN,
-                reply_markup=get_cancel_menu()
-            )
-            return
+    # ── back to main menu ───────────────────────────────────────────────
 
-        tiktok_url, title = [part.strip() for part in payload.split("|", 1)]
-        if not tiktok_url or not title:
-            await message.answer(
-                "Ссылка или название пустые. Пожалуйста, используйте формат:\n`<ссылка> | <название>`",
-                parse_mode=ParseMode.MARKDOWN,
-                reply_markup=get_cancel_menu()
-            )
-            return
-
+    @router.callback_query(F.data == "menu:back")
+    async def cb_back(callback: CallbackQuery, state: FSMContext) -> None:
         await state.clear()
-        async with session_factory() as session:
-            async with session.begin():
-                service = await service_for_session(session)
-                draft = await service.submit(tiktok_url, title, message.from_user.id)
-                await message.answer(
-                    f"Черновик #{draft.id} создан:\n\n{draft.card_text}\n\n"
-                    "Проверьте карточку перед публикацией.",
-                    parse_mode=ParseMode.HTML,
-                    disable_web_page_preview=True,
-                    reply_markup=_draft_actions(draft.id),
-                )
-        await message.answer("Главное меню:", reply_markup=get_main_menu())
+        if callback.message:
+            await callback.message.edit_text(
+                "Выберите действие:",
+                reply_markup=_main_menu(),
+            )
+        await callback.answer()
+
+    # ── submit: step 1 – ask for TikTok URL ─────────────────────────────
+
+    @router.callback_query(F.data == "menu:submit")
+    async def cb_submit_start(callback: CallbackQuery, state: FSMContext) -> None:
+        if not _is_admin_cb(callback):
+            await callback.answer("Только для администраторов.", show_alert=True)
+            return
+        await state.set_state(SubmitMovieStates.waiting_for_url)
+        if callback.message:
+            await callback.message.edit_text(
+                "📎 <b>Шаг 1/2</b>\nОтправьте ссылку на TikTok:",
+                parse_mode=ParseMode.HTML,
+                reply_markup=_cancel_menu(),
+            )
+        await callback.answer()
+
+    # ── submit: step 1 handler – receive URL, ask for title ──────────────
+
+    @router.message(StateFilter(SubmitMovieStates.waiting_for_url))
+    async def fsm_receive_url(message: Message, state: FSMContext) -> None:
+        if not _is_admin_msg(message):
+            return
+        url = (message.text or "").strip()
+        if not url:
+            await message.answer(
+                "⚠️ Пустое сообщение. Пожалуйста, отправьте ссылку на TikTok:",
+                reply_markup=_cancel_menu(),
+            )
+            return
+        await state.update_data(tiktok_url=url)
+        await state.set_state(SubmitMovieStates.waiting_for_title)
+        await message.answer(
+            "🎬 <b>Шаг 2/2</b>\nТеперь отправьте название фильма:",
+            parse_mode=ParseMode.HTML,
+            reply_markup=_cancel_menu(),
+        )
+
+    # ── submit: step 2 handler – receive title, create draft ─────────────
+
+    @router.message(StateFilter(SubmitMovieStates.waiting_for_title))
+    async def fsm_receive_title(message: Message, state: FSMContext) -> None:
+        if not _is_admin_msg(message):
+            return
+        title = (message.text or "").strip()
+        if not title:
+            await message.answer(
+                "⚠️ Пустое сообщение. Пожалуйста, отправьте название фильма:",
+                reply_markup=_cancel_menu(),
+            )
+            return
+
+        data = await state.get_data()
+        tiktok_url = data.get("tiktok_url", "")
+        await state.clear()
+
+        try:
+            async with session_factory() as session:
+                async with session.begin():
+                    service = await _svc(session)
+                    draft = await service.submit(tiktok_url, title, message.from_user.id)
+                    await message.answer(
+                        f"✅ <b>Черновик #{draft.id}</b> создан:\n\n"
+                        f"{draft.card_text}\n\n"
+                        "Проверьте карточку и выберите действие:",
+                        parse_mode=ParseMode.HTML,
+                        disable_web_page_preview=True,
+                        reply_markup=_draft_actions(draft.id),
+                    )
+        except ValueError as exc:
+            await message.answer(f"❌ Ошибка: {exc}")
+
+        await message.answer("Главное меню:", reply_markup=_main_menu())
+
+    # ── pending drafts ──────────────────────────────────────────────────
 
     @router.callback_query(F.data == "menu:pending")
-    async def pending(callback: CallbackQuery) -> None:
-        if not is_admin_callback(callback):
+    async def cb_pending(callback: CallbackQuery) -> None:
+        if not _is_admin_cb(callback):
+            await callback.answer("Только для администраторов.", show_alert=True)
             return
+
         async with session_factory() as session:
-            service = await service_for_session(session)
+            service = await _svc(session)
             drafts = await service.pending_drafts()
-            
+
         if not drafts:
             if callback.message:
-                await callback.message.edit_text("Черновиков на проверке нет.", reply_markup=get_main_menu())
+                await callback.message.edit_text(
+                    "📭 Черновиков на проверке нет.",
+                    reply_markup=_main_menu(),
+                )
+            await callback.answer()
             return
-            
+
         if callback.message:
             await callback.message.delete()
-            await callback.message.answer(f"Черновиков на проверке: {len(drafts)}")
-            
+
         for draft in drafts:
             if callback.message:
                 await callback.message.answer(
-                    f"Черновик #{draft.id}\n\n{draft.card_text}",
+                    f"📋 <b>Черновик #{draft.id}</b>\n\n{draft.card_text}",
                     parse_mode=ParseMode.HTML,
                     disable_web_page_preview=True,
                     reply_markup=_draft_actions(draft.id),
                 )
-        if callback.message:
-            await callback.message.answer("Главное меню:", reply_markup=get_main_menu())
 
-    @router.callback_query(lambda callback: callback.data and callback.data.startswith("draft:"))
-    async def draft_action(callback: CallbackQuery, bot: Bot) -> None:
-        if not is_admin_callback(callback):
+        if callback.message:
+            await callback.message.answer(
+                f"Всего на модерации: <b>{len(drafts)}</b>",
+                parse_mode=ParseMode.HTML,
+                reply_markup=_main_menu(),
+            )
+        await callback.answer()
+
+    # ── approve / reject via inline buttons ─────────────────────────────
+
+    @router.callback_query(lambda cb: cb.data and cb.data.startswith("draft:"))
+    async def cb_draft_action(callback: CallbackQuery, bot: Bot) -> None:
+        if not _is_admin_cb(callback):
             await callback.answer("Только для администратора.", show_alert=True)
             return
 
@@ -167,14 +242,14 @@ def build_router(
         try:
             async with session_factory() as session:
                 async with session.begin():
-                    service = await service_for_session(session)
+                    service = await _svc(session)
                     if action == "approve":
                         publisher = AiogramPublisher(bot, settings.telegram_channel_id)
                         await service.approve(draft_id, publisher, local_date_now(settings.zoneinfo))
-                        status_text = f"Черновик #{draft_id} опубликован."
+                        status_text = f"✅ Черновик #{draft_id} опубликован в канал."
                     elif action == "reject":
                         await service.reject(draft_id)
-                        status_text = f"Черновик #{draft_id} отклонён."
+                        status_text = f"🗑 Черновик #{draft_id} отклонён."
                     else:
                         await callback.answer("Неизвестное действие.", show_alert=True)
                         return
@@ -183,63 +258,71 @@ def build_router(
             return
 
         if callback.message:
-            await callback.message.edit_reply_markup(reply_markup=None)
-            await callback.message.answer(status_text)
+            await callback.message.edit_text(status_text, reply_markup=None)
         await callback.answer(status_text)
 
+    # ── digest now ──────────────────────────────────────────────────────
+
     @router.callback_query(F.data == "menu:digest")
-    async def digest_now(callback: CallbackQuery, bot: Bot) -> None:
-        if not is_admin_callback(callback):
+    async def cb_digest(callback: CallbackQuery, bot: Bot) -> None:
+        if not _is_admin_cb(callback):
+            await callback.answer("Только для администраторов.", show_alert=True)
             return
+
+        if callback.message:
+            await callback.message.edit_text("⏳ Формирую дайджест…")
+
         async with session_factory() as session:
             async with session.begin():
-                service = await service_for_session(session)
+                service = await _svc(session)
                 publisher = AiogramPublisher(bot, settings.telegram_channel_id)
                 digest = await service.create_digest(publisher, local_date_now(settings.zoneinfo))
-                
-        text = "Дайджест опубликован." if digest else "Сегодня фильмов нет, дайджест пропущен."
+
+        text = "📰 Дайджест опубликован!" if digest else "Сегодня фильмов нет, дайджест пропущен."
         if callback.message:
-            await callback.message.edit_text(text, reply_markup=get_main_menu())
+            await callback.message.edit_text(text, reply_markup=_main_menu())
+        await callback.answer()
+
+    # ── recommend now ───────────────────────────────────────────────────
 
     @router.callback_query(F.data == "menu:recommend")
-    async def recommend_now(callback: CallbackQuery, bot: Bot) -> None:
-        if not is_admin_callback(callback):
+    async def cb_recommend(callback: CallbackQuery, bot: Bot) -> None:
+        if not _is_admin_cb(callback):
+            await callback.answer("Только для администраторов.", show_alert=True)
             return
+
+        if callback.message:
+            await callback.message.edit_text("⏳ Формирую подборку…")
+
         async with session_factory() as session:
             async with session.begin():
-                service = await service_for_session(session)
+                service = await _svc(session)
                 publisher = AiogramPublisher(bot, settings.telegram_channel_id)
                 recommendation = await service.create_recommendation(
                     publisher,
                     TelegramPollReader(),
                     local_date_now(settings.zoneinfo),
                 )
-                
-        text = "Подборка опубликована." if recommendation else "Дайджест не найден, подборка пропущена."
+
+        text = "🍿 Подборка опубликована!" if recommendation else "Дайджест не найден, подборка пропущена."
         if callback.message:
-            await callback.message.edit_text(text, reply_markup=get_main_menu())
+            await callback.message.edit_text(text, reply_markup=_main_menu())
+        await callback.answer()
+
+    # ── poll vote tracking ──────────────────────────────────────────────
 
     @router.poll()
     async def poll_update(poll: Poll) -> None:
         votes = [option.voter_count for option in poll.options]
         async with session_factory() as session:
             async with session.begin():
-                service = await service_for_session(session)
+                service = await _svc(session)
                 await service.update_poll_votes(poll.id, votes)
 
     return router
 
 
-def _draft_actions(draft_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(text="Опубликовать", callback_data=f"draft:approve:{draft_id}"),
-                InlineKeyboardButton(text="Отклонить", callback_data=f"draft:reject:{draft_id}"),
-            ]
-        ]
-    )
-
+# ── private helpers ─────────────────────────────────────────────────────
 
 def _parse_draft_callback(data: str | None) -> tuple[str | None, int | None]:
     if not data:
