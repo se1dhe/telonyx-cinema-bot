@@ -19,6 +19,8 @@ async def create_schema(engine: AsyncEngine) -> None:
     from sqlalchemy import text
     
     migrations = [
+        # Старая колонка из MVP — убираем NOT NULL чтобы не блокировала вставки
+        "ALTER TABLE submissions ALTER COLUMN tiktok_url DROP NOT NULL",
         "ALTER TABLE submissions ADD COLUMN IF NOT EXISTS video_file_id VARCHAR(255)",
         "ALTER TABLE drafts ADD COLUMN IF NOT EXISTS video_file_id VARCHAR(255)",
         "ALTER TABLE news_posts ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'pending'",
