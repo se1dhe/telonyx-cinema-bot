@@ -25,6 +25,7 @@ def configure_scheduler(
 ) -> AsyncIOScheduler:
     scheduler = AsyncIOScheduler(timezone=settings.zoneinfo)
     common_args = [settings, session_factory, publisher]
+    now = datetime.now(settings.zoneinfo)
 
     scheduler.add_job(
         _run_teaser, "cron", hour=11, minute=0,
@@ -50,10 +51,12 @@ def configure_scheduler(
     scheduler.add_job(
         _run_editorial_collector, "interval", minutes=15,
         args=[settings, session_factory], id="editorial_collector", replace_existing=True,
+        next_run_time=now,
     )
     scheduler.add_job(
         _run_editorial_publisher, "interval", minutes=5,
         args=common_args, id="editorial_publisher", replace_existing=True,
+        next_run_time=now + timedelta(seconds=45),
     )
     return scheduler
 

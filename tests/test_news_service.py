@@ -60,6 +60,14 @@ def test_entry_image_urls_reads_media_content() -> None:
     assert _entry_image_urls(entry) == ["https://example.com/poster.jpg"]
 
 
+def test_entry_image_urls_reads_html_summary_images() -> None:
+    entry = SimpleNamespace(
+        summary='<p><img src="https://example.com/trailer-poster.webp?width=1200"></p>'
+    )
+
+    assert _entry_image_urls(entry) == ["https://example.com/trailer-poster.webp?width=1200"]
+
+
 async def test_get_next_approved_news_skips_posts_without_images() -> None:
     service = NewsService(
         FakeSession(

@@ -1,5 +1,7 @@
 import logging
+import re
 from datetime import datetime
+from html import unescape
 
 import feedparser
 from sqlalchemy import delete, select, func
@@ -36,11 +38,29 @@ def _entry_image_urls(entry) -> list[str]:
         if href and (str(link_type).startswith("image/") or _looks_like_image(href)):
             urls.append(href)
 
+    for field_name in ("summary", "description", "content"):
+        value = getattr(entry, field_name, None)
+        if isinstance(value, list):
+            for item in value:
+                if isinstance(item, dict):
+                    urls.extend(_html_image_urls(str(item.get("value") or "")))
+        elif value:
+            urls.extend(_html_image_urls(str(value)))
+
     return list(dict.fromkeys(urls))
 
 
 def _looks_like_image(url: str) -> bool:
     return url.lower().split("?", 1)[0].endswith((".jpg", ".jpeg", ".png", ".webp"))
+
+
+def _html_image_urls(html: str) -> list[str]:
+    urls = []
+    for match in re.finditer(r'<img[^>]+src=["\']([^"\']+)["\']', html, flags=re.IGNORECASE):
+        url = unescape(match.group(1)).strip()
+        if url and _looks_like_image(url):
+            urls.append(url)
+    return urls
 
 
 # Fallback parser if Gemini isn't available
