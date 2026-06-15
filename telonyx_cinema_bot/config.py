@@ -18,6 +18,11 @@ class Settings(BaseSettings):
     timezone: str = Field(default="Europe/Kiev", alias="TIMEZONE")
     digest_time: str = Field(default="22:00", alias="DIGEST_TIME")
     recommendation_time: str = Field(default="10:00", alias="RECOMMENDATION_TIME")
+    auto_publish_enabled: bool = Field(default=True, alias="AUTO_PUBLISH_ENABLED")
+    news_min_interval_minutes: int = Field(default=35, alias="NEWS_MIN_INTERVAL_MINUTES")
+    daily_news_limit: int = Field(default=6, alias="DAILY_NEWS_LIMIT")
+    fallback_min_interval_hours: int = Field(default=4, alias="FALLBACK_MIN_INTERVAL_HOURS")
+    editorial_tone: str = Field(default="cinema_magazine", alias="EDITORIAL_TONE")
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore", populate_by_name=True)
 

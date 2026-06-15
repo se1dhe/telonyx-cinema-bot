@@ -6,6 +6,8 @@ from sqlalchemy import delete, select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from telonyx_cinema_bot.models import NewsPost, NewsStatus, NewsUrl
+from telonyx_cinema_bot.models import EditorialPostType
+from telonyx_cinema_bot.services.editorial import EditorialService
 from telonyx_cinema_bot.services.gemini import GeminiCopywriter
 
 logger = logging.getLogger(__name__)
@@ -59,6 +61,74 @@ class NewsService:
             "https://www.hollywoodreporter.com/feed/"
         ]
 
+    async def fetch_and_enqueue_editorial_news(self, editorial: EditorialService) -> int:
+        """Fetch RSS and add selected poster-backed news to the editorial queue."""
+        all_news = await self._fetch_rss_news()
+        if not all_news:
+            return 0
+
+        links = [item["link"] for item in all_news if item["link"]]
+        if not links:
+            return 0
+
+        existing_news = await self.session.execute(select(NewsUrl.url).where(NewsUrl.url.in_(links)))
+        processed_urls = set(existing_news.scalars().all())
+        existing_posts = await self.session.execute(
+            select(editorial_post_source_key())
+            .where(editorial_post_source_key().in_(links))
+        )
+        processed_urls.update(url for url in existing_posts.scalars().all() if url)
+
+        new_news = [
+            item
+            for item in all_news
+            if item["link"] not in processed_urls and item["images"]
+        ]
+        if not new_news:
+            return 0
+
+        for i, item in enumerate(new_news):
+            item["id"] = i
+
+        if hasattr(self.copywriter, "filter_editorial_news"):
+            selected_ids = await self.copywriter.filter_editorial_news(new_news)
+        else:
+            selected_ids = await self.copywriter.filter_news(new_news)
+        selected_news = [item for item in new_news if item["id"] in selected_ids]
+
+        generated = 0
+        for item in selected_news:
+            if hasattr(self.copywriter, "generate_editorial_news_post"):
+                data = await self.copywriter.generate_editorial_news_post(item)
+            else:
+                data = {
+                    "title": item.get("title") or "Киноновость",
+                    "body": await self.copywriter.generate_news_post(item),
+                    "hashtags": ["#новости", "#кино", "#telonyxcinema"],
+                }
+            post = await editorial.enqueue_post(
+                post_type=EditorialPostType.news,
+                title=str(data.get("title") or item.get("title") or "Киноновость"),
+                text=str(data.get("body") or item.get("description") or ""),
+                hashtags=list(data.get("hashtags") or ["#новости", "#кино"]),
+                image_url=item["images"][0],
+                source_url=item.get("link"),
+                source_key=item.get("link"),
+                metadata={
+                    "source_title": item.get("title"),
+                    "source_description": item.get("description"),
+                    "image_urls": item.get("images", []),
+                },
+            )
+            if post is not None:
+                generated += 1
+
+        for item in new_news:
+            if item["link"]:
+                self.session.add(NewsUrl(url=item["link"]))
+        await self.session.commit()
+        return generated
+
     async def has_news_for_date(self, day) -> bool:
         stmt = (
             select(func.count(NewsPost.id))
@@ -75,19 +145,7 @@ class NewsService:
 
     async def fetch_and_prepare_news(self) -> int:
         """Fetch RSS, filter unique, deduplicate with Gemini, and save as pending drafts."""
-        all_news = []
-        for url in self.rss_feeds:
-            try:
-                feed = feedparser.parse(url)
-                for entry in feed.entries[:10]:  # Top 10 from each source
-                    all_news.append({
-                        "title": getattr(entry, "title", ""),
-                        "description": getattr(entry, "description", ""),
-                        "link": getattr(entry, "link", ""),
-                        "images": _entry_image_urls(entry),
-                    })
-            except Exception as e:
-                logger.error(f"Error fetching RSS {url}: {e}")
+        all_news = await self._fetch_rss_news()
 
         if not all_news:
             return 0
@@ -144,6 +202,22 @@ class NewsService:
         await self.session.commit()
         return generated_count
 
+    async def _fetch_rss_news(self) -> list[dict]:
+        all_news = []
+        for url in self.rss_feeds:
+            try:
+                feed = feedparser.parse(url)
+                for entry in feed.entries[:10]:
+                    all_news.append({
+                        "title": getattr(entry, "title", ""),
+                        "description": getattr(entry, "description", ""),
+                        "link": getattr(entry, "link", ""),
+                        "images": _entry_image_urls(entry),
+                    })
+            except Exception as e:
+                logger.error(f"Error fetching RSS {url}: {e}")
+        return all_news
+
     async def clear_news_queue(self) -> int:
         post_result = await self.session.execute(delete(NewsPost))
         url_result = await self.session.execute(delete(NewsUrl))
@@ -186,3 +260,9 @@ class NewsService:
             stmt = stmt.where(func.date(NewsPost.scheduled_for) == day)
         result = await self.session.execute(stmt)
         return result.scalars().first()
+
+
+def editorial_post_source_key():
+    from telonyx_cinema_bot.models import EditorialPost
+
+    return EditorialPost.source_key

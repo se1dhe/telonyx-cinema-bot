@@ -14,8 +14,9 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from sqlalchemy.orm import selectinload
 
 from telonyx_cinema_bot.config import Settings
-from telonyx_cinema_bot.models import Campaign
+from telonyx_cinema_bot.models import Campaign, EditorialPostStatus
 from telonyx_cinema_bot.services.content import ContentService
+from telonyx_cinema_bot.services.editorial import EditorialService
 from telonyx_cinema_bot.services.formatting import format_news_post
 
 
@@ -33,6 +34,12 @@ class SubmitNewsStates(StatesGroup):
 def _main_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
+            [InlineKeyboardButton(text="🎛 Редакционная очередь", callback_data="editorial:queue")],
+            [
+                InlineKeyboardButton(text="▶️ Автопоток", callback_data="editorial:resume"),
+                InlineKeyboardButton(text="⏸ Пауза", callback_data="editorial:pause"),
+            ],
+            [InlineKeyboardButton(text="🚀 Опубликовать сейчас", callback_data="editorial:publish_now")],
             [InlineKeyboardButton(text="🎬 Отправить фильм", callback_data="menu:submit")],
             [InlineKeyboardButton(text="📰 Опубликовать (руками)", callback_data="menu:news")],
             [InlineKeyboardButton(text="📋 Черновики фильмов", callback_data="menu:pending")],
@@ -129,6 +136,9 @@ def build_router(
     async def _svc(session) -> ContentService:
         return ContentService(session, movie_provider, copywriter)
 
+    async def _editorial_svc(session) -> EditorialService:
+        return EditorialService(session, settings, copywriter)
+
     async def _show_main_menu(callback: CallbackQuery, state: FSMContext, text: str) -> None:
         await state.clear()
         if not callback.message:
@@ -167,6 +177,104 @@ def build_router(
     async def cb_back(callback: CallbackQuery, state: FSMContext) -> None:
         await _show_main_menu(callback, state, "Выберите действие:")
         await callback.answer()
+
+    # ── editorial v2 controls ───────────────────────────────────────────
+
+    @router.callback_query(F.data == "editorial:queue")
+    async def cb_editorial_queue(callback: CallbackQuery) -> None:
+        if not _is_admin_cb(callback):
+            await callback.answer("Только для администраторов.", show_alert=True)
+            return
+
+        async with session_factory() as session:
+            editorial = await _editorial_svc(session)
+            control = await editorial.get_or_create_control()
+            posts = await editorial.queue_status(limit=12)
+
+        pause_text = ""
+        if control.paused_until:
+            pause_text = f"\nПауза до: <b>{control.paused_until:%d.%m %H:%M}</b>"
+        text = (
+            "🎛 <b>Редакционный автопоток</b>\n"
+            f"Статус: <b>{'включен' if control.autopublish_enabled else 'выключен'}</b>"
+            f"{pause_text}\n\n"
+        )
+        if not posts:
+            text += "Очередь пуста. Бот попробует собрать новости или сделать fallback-пост."
+        else:
+            lines = []
+            for post in posts:
+                slot = post.scheduled_for.strftime("%d.%m %H:%M") if post.scheduled_for else "ближайший слот"
+                lines.append(f"#{post.id} · {post.post_type.value} · {slot}\n<b>{post.title or 'Без заголовка'}</b>")
+            text += "\n\n".join(lines)
+
+        if callback.message:
+            await _replace_callback_message(
+                callback.message,
+                text,
+                reply_markup=_main_menu(),
+                parse_mode=ParseMode.HTML,
+            )
+        await callback.answer()
+
+    @router.callback_query(F.data == "editorial:pause")
+    async def cb_editorial_pause(callback: CallbackQuery) -> None:
+        if not _is_admin_cb(callback):
+            await callback.answer("Только для администраторов.", show_alert=True)
+            return
+
+        async with session_factory() as session:
+            async with session.begin():
+                editorial = await _editorial_svc(session)
+                control = await editorial.pause_for_hours(6, now=datetime.datetime.now(settings.zoneinfo))
+
+        if callback.message:
+            await _replace_callback_message(
+                callback.message,
+                f"⏸ Автопоток поставлен на паузу до <b>{control.paused_until:%d.%m %H:%M}</b>.",
+                reply_markup=_main_menu(),
+            )
+        await callback.answer("Пауза включена")
+
+    @router.callback_query(F.data == "editorial:resume")
+    async def cb_editorial_resume(callback: CallbackQuery) -> None:
+        if not _is_admin_cb(callback):
+            await callback.answer("Только для администраторов.", show_alert=True)
+            return
+
+        async with session_factory() as session:
+            async with session.begin():
+                editorial = await _editorial_svc(session)
+                await editorial.set_autopublish(True)
+
+        if callback.message:
+            await _replace_callback_message(
+                callback.message,
+                "▶️ Автопоток снова включен.",
+                reply_markup=_main_menu(),
+            )
+        await callback.answer("Автопоток включен")
+
+    @router.callback_query(F.data == "editorial:publish_now")
+    async def cb_editorial_publish_now(callback: CallbackQuery, bot: Bot) -> None:
+        if not _is_admin_cb(callback):
+            await callback.answer("Только для администраторов.", show_alert=True)
+            return
+
+        from telonyx_cinema_bot.bot.publisher import AiogramPublisher
+
+        async with session_factory() as session:
+            async with session.begin():
+                editorial = await _editorial_svc(session)
+                post = await editorial.maybe_publish_next(
+                    AiogramPublisher(bot, settings.telegram_channel_id),
+                    now=datetime.datetime.now(settings.zoneinfo),
+                )
+
+        text = "🚀 Пост опубликован." if post else "Пока нечего публиковать или автопоток на паузе."
+        if callback.message:
+            await _replace_callback_message(callback.message, text, reply_markup=_main_menu())
+        await callback.answer(text)
 
     # ── submit: step 1 – ask for video ──────────────────────────────────
 

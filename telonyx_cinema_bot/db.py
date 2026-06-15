@@ -34,6 +34,7 @@ async def create_schema(engine: AsyncEngine) -> None:
         "ALTER TABLE news_posts ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'pending'",
         "ALTER TABLE news_posts ADD COLUMN IF NOT EXISTS scheduled_for TIMESTAMP WITH TIME ZONE",
         "CREATE TABLE IF NOT EXISTS news_urls (id SERIAL PRIMARY KEY, url VARCHAR(512) UNIQUE NOT NULL, created_at TIMESTAMPTZ DEFAULT NOW())",
+        "CREATE TABLE IF NOT EXISTS editorial_control (id INTEGER PRIMARY KEY, autopublish_enabled BOOLEAN DEFAULT TRUE NOT NULL, paused_until TIMESTAMPTZ, last_news_published_at TIMESTAMPTZ, last_fallback_published_at TIMESTAMPTZ, updated_at TIMESTAMPTZ DEFAULT NOW())",
     ]
 
     async with engine.begin() as conn:
@@ -69,6 +70,10 @@ async def _clear_legacy_news(engine: AsyncEngine) -> None:
     await run_once(
         "clear_news_without_images_v1",
         ["DELETE FROM news_posts WHERE image_url IS NULL OR image_url = ''"],
+    )
+    await run_once(
+        "seed_editorial_control_v1",
+        ["INSERT INTO editorial_control (id, autopublish_enabled) VALUES (1, TRUE) ON CONFLICT (id) DO NOTHING"],
     )
 
 

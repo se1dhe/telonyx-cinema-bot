@@ -1,4 +1,5 @@
 from telonyx_cinema_bot.services.formatting import (
+    format_editorial_post,
     format_review,
     format_fact,
     format_recommendations,
@@ -8,6 +9,7 @@ from telonyx_cinema_bot.services.formatting import (
     format_video_caption,
     poster_url_from_path,
 )
+from telonyx_cinema_bot.models import EditorialPost, EditorialPostType
 from telonyx_cinema_bot.services.tmdb import MovieMetadata, normalize_movie
 from telonyx_cinema_bot.bot.handlers import _parse_draft_callback
 
@@ -125,6 +127,23 @@ def test_format_news_post_uses_html_and_escapes_source() -> None:
     assert "Spielberg &amp; aliens" in text
     assert "a=1&amp;b=2" in text
     assert "**" not in text
+
+
+def test_format_editorial_news_post_has_tags_and_no_source_link() -> None:
+    post = EditorialPost(
+        post_type=EditorialPostType.news,
+        title="Big Trailer",
+        text="Студия показала первый трейлер.",
+        hashtags=["#новости", "#трейлеры", "#telonyxcinema"],
+        image_url="https://example.com/poster.jpg",
+        source_url="https://example.com/source",
+    )
+
+    text = format_editorial_post(post)
+
+    assert "<b>Киноновость</b>" in text
+    assert "#новости" in text
+    assert "https://example.com/source" not in text
 
 
 def test_format_video_caption_includes_rating_and_overview() -> None:

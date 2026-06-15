@@ -131,6 +131,23 @@ class NewsStatus(str, enum.Enum):
     published = "published"
 
 
+class EditorialPostType(str, enum.Enum):
+    news = "news"
+    review = "review"
+    selection = "selection"
+    poll = "poll"
+    discussion = "discussion"
+
+
+class EditorialPostStatus(str, enum.Enum):
+    draft = "draft"
+    ready = "ready"
+    published = "published"
+    rejected = "rejected"
+    failed = "failed"
+    skipped = "skipped"
+
+
 class NewsUrl(Base):
     __tablename__ = "news_urls"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -154,6 +171,46 @@ class NewsPost(Base):
     published_msg_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class EditorialPost(Base):
+    __tablename__ = "editorial_posts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    post_type: Mapped[EditorialPostType] = mapped_column(
+        Enum(EditorialPostType, native_enum=False),
+        index=True,
+    )
+    status: Mapped[EditorialPostStatus] = mapped_column(
+        Enum(EditorialPostStatus, native_enum=False),
+        default=EditorialPostStatus.ready,
+        index=True,
+    )
+    title: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    text: Mapped[str] = mapped_column(Text)
+    hashtags: Mapped[list[str]] = mapped_column(JSON, default=list)
+    image_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    video_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    source_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    source_key: Mapped[str | None] = mapped_column(String(512), unique=True, nullable=True, index=True)
+    scheduled_for: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    published_msg_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+class EditorialControl(Base):
+    __tablename__ = "editorial_control"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    autopublish_enabled: Mapped[bool] = mapped_column(default=True)
+    paused_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_news_published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_fallback_published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
 
 class SchemaMigration(Base):

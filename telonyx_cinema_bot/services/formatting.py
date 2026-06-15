@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from html import escape
 
+from telonyx_cinema_bot.models import EditorialPost
 from telonyx_cinema_bot.services.tmdb import MovieMetadata
 
 TELEGRAM_MEDIA_CAPTION_LIMIT = 1024
@@ -112,3 +113,37 @@ def format_news_post(title: str, body: str, source_url: str | None = None) -> st
     if source_url:
         lines.extend(["", f"<a href=\"{escape(source_url, quote=True)}\">Источник</a>"])
     return _trim_caption("\n".join(line for line in lines if line is not None))
+
+
+def normalize_hashtag(value: str) -> str:
+    normalized = value.strip()
+    if not normalized:
+        return ""
+    normalized = normalized.replace(" ", "")
+    if not normalized.startswith("#"):
+        normalized = f"#{normalized}"
+    return normalized
+
+
+def format_editorial_post(post: EditorialPost) -> str:
+    title = escape((post.title or "").strip())
+    body = escape(post.text.strip())
+    hashtags = [normalize_hashtag(tag) for tag in post.hashtags if normalize_hashtag(tag)]
+    hashtag_line = " ".join(dict.fromkeys(hashtags))
+
+    prefix_by_type = {
+        "news": "Киноновость",
+        "review": "Разбор",
+        "selection": "Что смотреть",
+        "poll": "Голосование",
+        "discussion": "Тема дня",
+    }
+    label = prefix_by_type.get(getattr(post.post_type, "value", str(post.post_type)), "Telonyx Cinema")
+
+    lines = [f"<b>{escape(label)}</b>"]
+    if title:
+        lines.extend(["", f"<b>{title}</b>"])
+    lines.extend(["", body])
+    if hashtag_line:
+        lines.extend(["", escape(hashtag_line)])
+    return _trim_caption("\n".join(lines))

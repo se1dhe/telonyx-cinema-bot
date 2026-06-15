@@ -12,12 +12,10 @@ from telonyx_cinema_bot.services.campaign import CampaignPublisherService
 
 logger = logging.getLogger(__name__)
 
-# ── Fixed broadcast schedule (Europe/Kiev) ──────────────────────────────
-# 11:00 — Teaser (video)
-# 14:00 — Review (poster + description + rating)
-# 17:00 — Fact / Quote
-# 20:00 — Recommendations (3 similar films)
-# 10:00 (next day) — Poll ("Which film have you seen?")
+# ── Editorial v2 schedule (Europe/Kiev) ────────────────────────────────
+# A frequent editorial tick keeps the queue warm and publishes only when
+# cadence rules allow it. Legacy campaign jobs stay as compatibility hooks
+# for already queued film campaigns.
 
 
 def configure_scheduler(
@@ -50,14 +48,12 @@ def configure_scheduler(
     )
     
     scheduler.add_job(
-        _run_news_scraper, "interval", minutes=10,
-        args=[settings, session_factory], id="news_scraper", replace_existing=True,
+        _run_editorial_collector, "interval", minutes=15,
+        args=[settings, session_factory], id="editorial_collector", replace_existing=True,
     )
-    
-    # News publisher fills gaps
     scheduler.add_job(
-        _run_news_publisher, "cron", hour="12,13,15,16,18,19,21", minute=0,
-        args=common_args, id="news_publisher", replace_existing=True,
+        _run_editorial_publisher, "interval", minutes=5,
+        args=common_args, id="editorial_publisher", replace_existing=True,
     )
     return scheduler
 
@@ -162,3 +158,36 @@ async def _run_news_publisher(settings: Settings, session_factory, publisher: Ai
                     post.status = NewsStatus.published
                 except Exception as e:
                     logger.error(f"Failed to publish news {post.id}: {e}")
+
+
+async def _run_editorial_collector(settings: Settings, session_factory) -> None:
+    from telonyx_cinema_bot.services.editorial import EditorialService
+    from telonyx_cinema_bot.services.gemini import GeminiCopywriter
+    from telonyx_cinema_bot.services.news import NewsService
+
+    logger.info("Collecting editorial news")
+    async with session_factory() as session:
+        copywriter = GeminiCopywriter(settings.gemini_api_key, settings.gemini_model)
+        editorial = EditorialService(session, settings, copywriter)
+        news = NewsService(session, copywriter)
+        try:
+            count = await news.fetch_and_enqueue_editorial_news(editorial)
+            logger.info("Queued %s editorial news posts", count)
+        except Exception:
+            logger.exception("Failed to collect editorial news")
+
+
+async def _run_editorial_publisher(
+    settings: Settings,
+    session_factory,
+    publisher: AiogramPublisher,
+) -> None:
+    from telonyx_cinema_bot.services.editorial import EditorialService
+    from telonyx_cinema_bot.services.gemini import GeminiCopywriter
+
+    logger.info("Running editorial publisher tick")
+    async with session_factory() as session:
+        async with session.begin():
+            copywriter = GeminiCopywriter(settings.gemini_api_key, settings.gemini_model)
+            editorial = EditorialService(session, settings, copywriter)
+            await editorial.maybe_publish_next(publisher)
