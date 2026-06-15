@@ -79,6 +79,37 @@ def _back_to_main_menu() -> InlineKeyboardMarkup:
     )
 
 
+async def _replace_callback_message(
+    message: Message,
+    text: str,
+    *,
+    reply_markup: InlineKeyboardMarkup | None = None,
+    parse_mode: ParseMode | None = ParseMode.HTML,
+) -> None:
+    try:
+        await message.edit_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
+        return
+    except TelegramBadRequest:
+        pass
+
+    if message.caption is not None:
+        try:
+            await message.edit_caption(
+                caption=text,
+                reply_markup=reply_markup,
+                parse_mode=parse_mode,
+            )
+            return
+        except TelegramBadRequest:
+            pass
+
+    try:
+        await message.edit_reply_markup(reply_markup=None)
+    except TelegramBadRequest:
+        pass
+    await message.answer(text, reply_markup=reply_markup, parse_mode=parse_mode)
+
+
 def build_router(
     settings: Settings,
     session_factory: async_sessionmaker,
@@ -103,14 +134,7 @@ def build_router(
         if not callback.message:
             return
 
-        try:
-            await callback.message.edit_text(text, reply_markup=_main_menu())
-        except TelegramBadRequest:
-            try:
-                await callback.message.edit_reply_markup(reply_markup=None)
-            except TelegramBadRequest:
-                pass
-            await callback.message.answer(text, reply_markup=_main_menu())
+        await _replace_callback_message(callback.message, text, reply_markup=_main_menu())
 
     # ── /start  →  main menu ────────────────────────────────────────────
 
@@ -153,7 +177,8 @@ def build_router(
             return
         await state.set_state(SubmitMovieStates.waiting_for_video)
         if callback.message:
-            await callback.message.edit_text(
+            await _replace_callback_message(
+                callback.message,
                 "📎 <b>Шаг 1/2</b>\nЗагрузите видеофайл (MP4) или отправьте ссылку:",
                 parse_mode=ParseMode.HTML,
                 reply_markup=_cancel_menu(),
@@ -241,7 +266,8 @@ def build_router(
         if action == "confirm_no":
             await state.set_state(SubmitMovieStates.waiting_for_title)
             if callback.message:
-                await callback.message.edit_text(
+                await _replace_callback_message(
+                    callback.message,
                     "Введите другое название фильма:",
                     reply_markup=_cancel_menu(),
                 )
@@ -255,7 +281,11 @@ def build_router(
         await state.clear()
 
         if callback.message:
-            await callback.message.edit_text("⏳ Генерирую кампанию на весь день (это займет немного времени)...")
+            await _replace_callback_message(
+                callback.message,
+                "⏳ Генерирую кампанию на весь день (это займет немного времени)...",
+                parse_mode=None,
+            )
 
         try:
             async with session_factory() as session:
@@ -298,7 +328,8 @@ def build_router(
 
         if not drafts:
             if callback.message:
-                await callback.message.edit_text(
+                await _replace_callback_message(
+                    callback.message,
                     "📭 Черновиков на проверке нет.",
                     reply_markup=_main_menu(),
                 )
@@ -347,7 +378,8 @@ def build_router(
 
         if not news_drafts:
             if callback.message:
-                await callback.message.edit_text(
+                await _replace_callback_message(
+                    callback.message,
                     "📭 Новых сгенерированных новостей нет.",
                     reply_markup=_main_menu(),
                 )
@@ -417,7 +449,11 @@ def build_router(
             return
 
         if callback.message:
-            await callback.message.edit_text(status_text, reply_markup=_back_to_main_menu())
+            await _replace_callback_message(
+                callback.message,
+                status_text,
+                reply_markup=_back_to_main_menu(),
+            )
         await callback.answer(status_text)
 
     # ── approve / reject via inline buttons ─────────────────────────────
@@ -457,7 +493,11 @@ def build_router(
             return
 
         if callback.message:
-            await callback.message.edit_text(status_text, reply_markup=_back_to_main_menu())
+            await _replace_callback_message(
+                callback.message,
+                status_text,
+                reply_markup=_back_to_main_menu(),
+            )
         await callback.answer(status_text)
 
     # ── queue status ──────────────────────────────────────────────────────
@@ -485,10 +525,12 @@ def build_router(
                     text += f"- {c.local_date.strftime('%d.%m.%Y')}: Фильм #{c.draft.film_id}\n"
 
         if callback.message:
-            try:
-                await callback.message.edit_text(text, reply_markup=_main_menu(), parse_mode=ParseMode.HTML)
-            except Exception:
-                pass
+            await _replace_callback_message(
+                callback.message,
+                text,
+                reply_markup=_main_menu(),
+                parse_mode=ParseMode.HTML,
+            )
         await callback.answer()
 
 
@@ -502,7 +544,8 @@ def build_router(
             return
         await state.set_state(SubmitNewsStates.waiting_for_news)
         if callback.message:
-            await callback.message.edit_text(
+            await _replace_callback_message(
+                callback.message,
                 "📰 <b>Отправьте новость</b>\n"
                 "Пришлите текст новости. Если нужно прикрепить фото/видео, отправьте их вместе с подписью.",
                 parse_mode=ParseMode.HTML,
