@@ -16,8 +16,6 @@ class Settings(BaseSettings):
     gemini_api_key: str = Field(alias="GEMINI_API_KEY")
     gemini_model: str = Field(default="gemini-2.5-flash", alias="GEMINI_MODEL")
     timezone: str = Field(default="Europe/Kiev", alias="TIMEZONE")
-    digest_time: str = Field(default="22:00", alias="DIGEST_TIME")
-    recommendation_time: str = Field(default="10:00", alias="RECOMMENDATION_TIME")
     auto_publish_enabled: bool = Field(default=True, alias="AUTO_PUBLISH_ENABLED")
     news_min_interval_minutes: int = Field(default=35, alias="NEWS_MIN_INTERVAL_MINUTES")
     daily_news_limit: int = Field(default=6, alias="DAILY_NEWS_LIMIT")
