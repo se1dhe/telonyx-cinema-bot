@@ -102,9 +102,13 @@ class GroqCopywriter:
             items_str += f"ID: {item['id']} | TITLE: {item['title']} | DESC: {item['description']}\n"
 
         prompt = (
-            "You are a professional cinema news editor. Here is a list of recent news articles.\n"
-            "Task: Select the most important, unique, and interesting news. Ignore cheap gossip, clickbait, and duplicates (if two articles are about the exact same thing, pick one).\n"
-            "Return ONLY a comma-separated list of IDs you selected. Do not write anything else.\n"
+            "You are a cinema news editor for a Telegram channel about movies and TV series.\n"
+            "Select ONLY news that is directly about movies or TV shows: premieres, trailers, "
+            "casting, studios, film festivals, box office, directors, actors in a film context.\n"
+            "REJECT politics, music (unless film soundtrack), sports, celebrity gossip without "
+            "film connection, and general news.\n"
+            "Ignore cheap gossip, clickbait, and duplicates.\n"
+            "Return ONLY a comma-separated list of IDs you selected. If nothing is relevant, return nothing.\n"
             f"Articles:\n{items_str}"
         )
         try:
@@ -126,10 +130,13 @@ class GroqCopywriter:
             )
 
         prompt = (
-            "Ты главный редактор Telegram-канала о кино. Нужно выбрать только новости, "
-            "которые реально интересны аудитории: премьеры, трейлеры, кастинг, крупные студии, "
-            "фестивали, касса, заметные режиссеры и актеры. Отсекай проходняк, сплетни, "
-            "слабый PR и дубли.\n"
+            "Ты главный редактор Telegram-канала о кино. Твоя задача — отобрать новости, "
+            "которые напрямую касаются кино и сериалов: премьеры, трейлеры, кастинг, "
+            "крупные студии (Disney, Warner, Netflix и т.д.), кинофестивали, сборы, "
+            "заметные режиссёры и актёры в контексте их работы.\n"
+            "КАТЕГОРИЧЕСКИ ОТСЕКАЙ: политику, музыку (если не про саундтреки к фильмам), "
+            "спорт, общественные события, светские сплетни без связи с кино.\n"
+            "Если новость не про кино или сериалы — не выбирай её.\n"
             "Выбери максимум 2 новости из списка. Верни только ID через запятую.\n\n"
             f"{items_str}"
         )
