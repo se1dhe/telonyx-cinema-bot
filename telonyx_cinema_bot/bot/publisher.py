@@ -26,6 +26,33 @@ class AiogramPublisher:
             )
         return message.message_id
 
+    async def publish_media_group(
+        self,
+        media_items: list[tuple[str, str | None]],
+        common_caption: str | None = None,
+    ) -> int:
+        from aiogram.types import InputMediaPhoto
+
+        input_media = []
+        for i, (item_text, image_url) in enumerate(media_items):
+            if not image_url:
+                continue
+            caption = common_caption if i == 0 else item_text
+            input_media.append(
+                InputMediaPhoto(media=image_url, caption=caption, parse_mode=ParseMode.HTML)
+            )
+
+        if not input_media:
+            message = await self.bot.send_message(
+                self.channel_id, common_caption or "", parse_mode=ParseMode.HTML
+            )
+            return message.message_id
+
+        messages = await self.bot.send_media_group(
+            self.channel_id, media=input_media
+        )
+        return messages[0].message_id
+
     async def publish_poll(self, text: str, options: list[str]) -> tuple[int, str | None]:
         await self.bot.send_message(self.channel_id, text, parse_mode=ParseMode.HTML)
         poll_message = await self.bot.send_poll(

@@ -38,17 +38,82 @@ def configure_scheduler(
         replace_existing=True,
         next_run_time=now + timedelta(seconds=45),
     )
+    scheduler.add_job(
+        _run_review_collector,
+        "interval",
+        hours=4,
+        args=[settings, session_factory],
+        id="review_collector",
+        replace_existing=True,
+        next_run_time=now + timedelta(minutes=2),
+    )
     return scheduler
+
+
+async def _build_copywriter(settings: Settings):
+    from telonyx_cinema_bot.services.gemini import FallbackCopywriter, GeminiCopywriter
+    from telonyx_cinema_bot.services.groq import GroqCopywriter
+
+    fallback: FallbackCopywriter
+    if settings.groq_api_key:
+        fallback = GroqCopywriter(settings.groq_api_key, settings.groq_model)
+    else:
+        fallback = FallbackCopywriter()
+
+    return GeminiCopywriter(settings.gemini_api_key, settings.gemini_model, fallback=fallback)
+
+
+async def _run_review_collector(settings: Settings, session_factory) -> None:
+    from sqlalchemy import func, select
+
+    from telonyx_cinema_bot.models import Film
+    from telonyx_cinema_bot.services.editorial import EditorialService
+    from telonyx_cinema_bot.services.tmdb import MovieMetadata
+
+    logger.info("Collecting review post")
+    async with session_factory() as session:
+        copywriter = await _build_copywriter(settings)
+        editorial = EditorialService(session, settings, copywriter)
+
+        result = await session.execute(
+            select(Film)
+            .where(Film.poster_path.is_not(None))
+            .where(Film.poster_path != "")
+            .order_by(func.random())
+            .limit(1)
+        )
+        film = result.scalar_one_or_none()
+        if film is None:
+            logger.info("No films available for review post")
+            return
+
+        movie = MovieMetadata(
+            tmdb_id=film.tmdb_id,
+            title=film.title,
+            original_title=film.original_title,
+            release_year=film.release_year,
+            overview=film.overview,
+            poster_path=film.poster_path,
+            imdb_id=film.imdb_id,
+            imdb_rating=film.imdb_rating,
+            genres=film.genres,
+            similar_movies=film.similar_movies,
+            raw_metadata=film.raw_metadata,
+        )
+        post = await editorial.enqueue_review_post(movie)
+        if post:
+            logger.info("Queued review post for %s", movie.display_title)
+        else:
+            logger.info("Review post skipped (duplicate?)")
 
 
 async def _run_editorial_collector(settings: Settings, session_factory) -> None:
     from telonyx_cinema_bot.services.editorial import EditorialService
-    from telonyx_cinema_bot.services.gemini import GeminiCopywriter
     from telonyx_cinema_bot.services.news import NewsService
 
     logger.info("Collecting editorial news")
     async with session_factory() as session:
-        copywriter = GeminiCopywriter(settings.gemini_api_key, settings.gemini_model)
+        copywriter = await _build_copywriter(settings)
         editorial = EditorialService(session, settings, copywriter)
         news = NewsService(session, copywriter)
         try:
@@ -64,11 +129,10 @@ async def _run_editorial_publisher(
     publisher: AiogramPublisher,
 ) -> None:
     from telonyx_cinema_bot.services.editorial import EditorialService
-    from telonyx_cinema_bot.services.gemini import GeminiCopywriter
 
     logger.info("Running editorial publisher tick")
     async with session_factory() as session:
         async with session.begin():
-            copywriter = GeminiCopywriter(settings.gemini_api_key, settings.gemini_model)
+            copywriter = await _build_copywriter(settings)
             editorial = EditorialService(session, settings, copywriter)
             await editorial.maybe_publish_next(publisher)

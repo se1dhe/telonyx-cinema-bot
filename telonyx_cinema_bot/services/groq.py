@@ -3,30 +3,32 @@ from __future__ import annotations
 import logging
 import re
 
-from google import genai
-from google.genai import errors
+from openai import AsyncOpenAI, RateLimitError
 
+from telonyx_cinema_bot.services.gemini import FallbackCopywriter, _parse_campaign_texts, _parse_key_value_block, _parse_tags
 from telonyx_cinema_bot.services.tmdb import MovieMetadata
 
 logger = logging.getLogger(__name__)
 
 
-class GeminiCopywriter:
-    def __init__(self, api_key: str, model: str = "gemini-2.5-flash", fallback: FallbackCopywriter | None = None) -> None:
-        self.client = genai.Client(api_key=api_key)
+class GroqCopywriter:
+    def __init__(self, api_key: str, model: str = "llama-3.3-70b-versatile") -> None:
+        self.client = AsyncOpenAI(base_url="https://api.groq.com/openai/v1", api_key=api_key)
         self.model = model
-        self.fallback = fallback or FallbackCopywriter()
+        self.fallback = FallbackCopywriter()
 
     async def _generate_text(self, prompt: str) -> str:
-        response = await self.client.aio.models.generate_content(model=self.model, contents=prompt)
-        return (response.text or "").strip()
+        response = await self.client.chat.completions.create(
+            model=self.model,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return (response.choices[0].message.content or "").strip()
 
     def _log_generation_error(self, task: str, exc: Exception) -> None:
-        status_code = getattr(exc, "code", None) or getattr(exc, "status_code", None)
-        if isinstance(exc, errors.ClientError) and status_code == 429:
-            logger.warning("Gemini quota exhausted while generating %s with model %s", task, self.model)
+        if isinstance(exc, RateLimitError):
+            logger.warning("Groq rate limited while generating %s with model %s", task, self.model)
             return
-        logger.exception("Gemini failed to generate %s with model %s", task, self.model)
+        logger.exception("Groq failed to generate %s with model %s", task, self.model)
 
     async def generate_campaign_texts(self, movie: MovieMetadata) -> tuple[str, str, str]:
         similar = ", ".join(m["title"] for m in movie.similar_movies[:3]) or "нет данных"
@@ -78,7 +80,6 @@ class GeminiCopywriter:
             self._log_generation_error("fact", exc)
             return await self.fallback.generate_fact(movie)
 
-
     async def generate_recommendations(self, movie: MovieMetadata) -> str:
         similar = ", ".join(m["title"] for m in movie.similar_movies[:3])
         prompt = (
@@ -93,15 +94,13 @@ class GeminiCopywriter:
             return await self.fallback.generate_recommendations(movie)
 
     async def filter_news(self, news_items: list[dict[str, str]]) -> list[int]:
-        """Returns a list of IDs of news items that are worth publishing."""
         if not news_items:
             return []
-        
-        # Prepare list for prompt
+
         items_str = ""
         for item in news_items:
             items_str += f"ID: {item['id']} | TITLE: {item['title']} | DESC: {item['description']}\n"
-            
+
         prompt = (
             "You are a professional cinema news editor. Here is a list of recent news articles.\n"
             "Task: Select the most important, unique, and interesting news. Ignore cheap gossip, clickbait, and duplicates (if two articles are about the exact same thing, pick one).\n"
@@ -110,13 +109,10 @@ class GeminiCopywriter:
         )
         try:
             text = await self._generate_text(prompt)
-            selected_ids = []
-            for match in re.finditer(r'\d+', text):
-                selected_ids.append(int(match.group()))
-            return selected_ids
+            return [int(match.group()) for match in re.finditer(r'\d+', text)]
         except Exception as exc:
             self._log_generation_error("news filter", exc)
-            return [item['id'] for item in news_items[:3]]  # Fallback to first 3
+            return [item['id'] for item in news_items[:3]]
 
     async def filter_editorial_news(self, news_items: list[dict[str, str]]) -> list[int]:
         if not news_items:
@@ -275,102 +271,3 @@ class GeminiCopywriter:
         except Exception as exc:
             self._log_generation_error("discussion post", exc)
             return await self.fallback.generate_discussion_post(movie)
-
-
-class FallbackCopywriter:
-    async def generate_campaign_texts(self, movie: MovieMetadata) -> tuple[str, str, str]:
-        return (
-            await self.generate_review(movie),
-            await self.generate_fact(movie),
-            await self.generate_recommendations(movie),
-        )
-
-    async def generate_review(self, movie: MovieMetadata) -> str:
-        if movie.overview:
-            first_sentence = movie.overview.split(".")[0].strip()
-            if first_sentence:
-                return first_sentence[:180]
-        return "Кинонастроение, которое стоит сохранить для правильного вечера."
-
-    async def generate_fact(self, movie: MovieMetadata) -> str:
-        return f"Погрузитесь в атмосферу фильма {movie.title}."
-
-    async def generate_recommendations(self, movie: MovieMetadata) -> str:
-        return "Если вам понравился этот фильм, обратите внимание на похожие картины."
-
-    async def generate_editorial_news_post(self, article: dict[str, str]) -> dict[str, object]:
-        body = (article.get("description") or article.get("title") or "").strip()
-        return {
-            "title": article.get("title") or "Киноновость",
-            "body": body[:650],
-            "hashtags": ["#новости", "#кино", "#telonyxcinema"],
-        }
-
-    def _selection_body(self, movies: list[MovieMetadata]) -> str:
-        lines = ["Подборка для вечера, когда хочется не просто включить фон, а выбрать настроение."]
-        for movie in movies[:5]:
-            lines.append(f"{movie.display_title} — {movie.overview or 'сильный вариант для просмотра.'}")
-        return "\n".join(lines)[:750]
-
-    async def generate_review_post(self, movie: MovieMetadata) -> dict[str, object]:
-        body = (movie.overview or "")[:500]
-        return {
-            "title": movie.display_title,
-            "body": body,
-            "hashtags": ["#кино", "#рецензия", "#telonyxcinema"],
-        }
-
-    async def generate_selection_post(self, movies: list[MovieMetadata]) -> dict[str, object]:
-        return {
-            "title": "Что смотреть вечером",
-            "body": self._selection_body(movies),
-            "hashtags": ["#подборка", "#вечернеекино", "#смотретьсегодня"],
-        }
-
-    async def generate_discussion_post(self, movie: MovieMetadata | None = None) -> dict[str, object]:
-        title = "Кино-вопрос"
-        body = "Какой фильм вы бы выбрали на вечер: проверенную классику или премьеру, о которой все говорят?"
-        return {
-            "title": title,
-            "body": body,
-            "options": ["Классика", "Премьера", "Авторское кино"],
-            "hashtags": ["#опрос", "#кино", "#telonyxcinema"],
-        }
-
-
-def _parse_campaign_texts(text: str) -> tuple[str, str, str] | None:
-    values: dict[str, str] = {}
-    for line in text.splitlines():
-        key, separator, value = line.partition(":")
-        if separator and key.strip().upper() in {"REVIEW", "FACT", "RECS"}:
-            values[key.strip().upper()] = value.strip()
-
-    if {"REVIEW", "FACT", "RECS"} <= values.keys():
-        return values["REVIEW"], values["FACT"], values["RECS"]
-    return None
-
-
-def _parse_key_value_block(text: str) -> dict[str, str]:
-    values: dict[str, str] = {}
-    current_key: str | None = None
-    for line in text.splitlines():
-        key, separator, value = line.partition(":")
-        clean_key = key.strip().upper()
-        if separator and clean_key in {"TITLE", "BODY", "TAGS", "OPTIONS"}:
-            current_key = clean_key
-            values[current_key] = value.strip()
-        elif current_key and line.strip():
-            values[current_key] = f"{values[current_key]}\n{line.strip()}".strip()
-    return values
-
-
-def _parse_tags(text: str) -> list[str]:
-    tags = []
-    for token in re.split(r"[\s,]+", text):
-        token = token.strip()
-        if not token:
-            continue
-        if not token.startswith("#"):
-            token = f"#{token}"
-        tags.append(token.replace(" ", ""))
-    return list(dict.fromkeys(tags))

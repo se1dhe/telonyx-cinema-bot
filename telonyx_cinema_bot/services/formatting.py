@@ -125,25 +125,31 @@ def normalize_hashtag(value: str) -> str:
     return normalized
 
 
-def format_editorial_post(post: EditorialPost) -> str:
+SIGNATURE_TEMPLATE = '🍿 <a href="{link}">УГОЛОК КИНОМАНА</a>'
+
+
+def format_editorial_post(post: EditorialPost, channel_link: str | None = None) -> str:
     title = escape((post.title or "").strip())
-    body = escape(post.text.strip())
-    hashtags = [normalize_hashtag(tag) for tag in post.hashtags if normalize_hashtag(tag)]
-    hashtag_line = " ".join(dict.fromkeys(hashtags))
+    body = post.text.strip()
 
     prefix_by_type = {
-        "news": "Киноновость",
-        "review": "Разбор",
-        "selection": "Что смотреть",
-        "poll": "Голосование",
-        "discussion": "Тема дня",
+        "news": "🗞 Киноновость",
+        "review": "🎬 Разбор",
+        "selection": "🍿 Что смотреть вечером",
+        "poll": "📊 Голосование",
+        "discussion": "💬 Тема дня",
     }
     label = prefix_by_type.get(getattr(post.post_type, "value", str(post.post_type)), "Telonyx Cinema")
 
     lines = [f"<b>{escape(label)}</b>"]
     if title:
-        lines.extend(["", f"<b>{title}</b>"])
+        lines.extend(["", f"<b>{escape(title)}</b>"])
     lines.extend(["", body])
-    if hashtag_line:
-        lines.extend(["", escape(hashtag_line)])
+    if channel_link:
+        lines.extend(["", SIGNATURE_TEMPLATE.format(link=channel_link)])
+    if post.hashtags:
+        hashtags = [normalize_hashtag(tag) for tag in post.hashtags if normalize_hashtag(tag)]
+        hashtag_line = " ".join(dict.fromkeys(hashtags))
+        if hashtag_line:
+            lines.extend(["", hashtag_line])
     return _trim_caption("\n".join(lines))

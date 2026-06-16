@@ -90,6 +90,7 @@ def settings(**overrides):
         "news_min_interval_minutes": 35,
         "fallback_min_interval_hours": 4,
         "zoneinfo": None,
+        "channel_link": None,
     }
     values.update(overrides)
     return SimpleNamespace(**values)

@@ -10,7 +10,22 @@ from telonyx_cinema_bot.bot.publisher import AiogramPublisher
 from telonyx_cinema_bot.config import get_settings
 from telonyx_cinema_bot.db import create_engine, create_schema, create_session_factory
 from telonyx_cinema_bot.scheduler import configure_scheduler
-from telonyx_cinema_bot.services.gemini import GeminiCopywriter
+from telonyx_cinema_bot.services.gemini import FallbackCopywriter, GeminiCopywriter
+from telonyx_cinema_bot.services.groq import GroqCopywriter
+
+
+def _build_copywriter(settings) -> GeminiCopywriter:
+    fallback: FallbackCopywriter
+    if settings.groq_api_key:
+        fallback = GroqCopywriter(settings.groq_api_key, settings.groq_model)
+    else:
+        fallback = FallbackCopywriter()
+
+    return GeminiCopywriter(
+        settings.gemini_api_key,
+        settings.gemini_model,
+        fallback=fallback,
+    )
 
 
 async def main() -> None:
@@ -22,7 +37,7 @@ async def main() -> None:
 
     bot = Bot(settings.bot_token)
     dispatcher = Dispatcher()
-    copywriter = GeminiCopywriter(settings.gemini_api_key, settings.gemini_model)
+    copywriter = _build_copywriter(settings)
     publisher = AiogramPublisher(bot, settings.telegram_channel_id)
 
     dispatcher.include_router(

@@ -141,9 +141,10 @@ def test_format_editorial_news_post_has_tags_and_no_source_link() -> None:
 
     text = format_editorial_post(post)
 
-    assert "<b>Киноновость</b>" in text
+    assert "<b>🗞 Киноновость</b>" in text
     assert "#новости" in text
     assert "https://example.com/source" not in text
+    assert "УГОЛОК КИНОМАНА" not in text
 
 
 def test_format_video_caption_includes_rating_and_overview() -> None:
