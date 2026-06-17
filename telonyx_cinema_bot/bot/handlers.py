@@ -335,9 +335,16 @@ def build_router(
                     .order_by(ShortsQueue.scheduled_for.desc())
                     .limit(1)
                 )
+                if last_time is None:
+                    last_time = await session.scalar(
+                        select(ShortsQueue.published_at)
+                        .where(ShortsQueue.status == ShortsQueueStatus.published)
+                        .order_by(ShortsQueue.published_at.desc())
+                        .limit(1)
+                    )
                 now = datetime.datetime.now(settings.zoneinfo)
-                if last_time and last_time > now:
-                    next_slot = last_time + timedelta(minutes=settings.shorts_interval_minutes)
+                if last_time:
+                    next_slot = max(now, last_time + timedelta(minutes=settings.shorts_interval_minutes))
                 else:
                     next_slot = now
 
@@ -382,9 +389,17 @@ def build_router(
                     .order_by(ShortsQueue.scheduled_for.desc())
                     .limit(1)
                 )
+                if last_slot is None:
+                    last_slot = await session.scalar(
+                        select(ShortsQueue.published_at)
+                        .where(ShortsQueue.status == ShortsQueueStatus.published)
+                        .where(ShortsQueue.id != item_id)
+                        .order_by(ShortsQueue.published_at.desc())
+                        .limit(1)
+                    )
                 now = datetime.datetime.now(settings.zoneinfo)
-                if last_slot and last_slot > now:
-                    next_slot = last_slot + timedelta(minutes=settings.shorts_interval_minutes)
+                if last_slot:
+                    next_slot = max(now, last_slot + timedelta(minutes=settings.shorts_interval_minutes))
                 else:
                     next_slot = now
 
