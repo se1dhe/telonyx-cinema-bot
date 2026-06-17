@@ -8,13 +8,14 @@ RUN apt-get update && \
       libcups2 libdrm2 libdbus-1-3 libxkbcommon0 \
       libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
       libgbm1 libpango-1.0-0 libcairo2 libasound2 \
-      libgtk-3-0 libgdk-pixbuf-2.0-0 libxshmfence1 \
-      ffmpeg \
-    && rm -rf /var/lib/apt/lists/* && \
-    curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
-    apt-get install -y --no-install-recommends nodejs && \
-    rm -rf /var/lib/apt/lists/* && \
-    curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh
+      libgtk-3-0 libgdk-pixbuf-2.0-0 libxshmfence1 gnupg2 ffmpeg \
+    && curl -fsSL https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg \
+    && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list \
+    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends nodejs google-chrome-stable \
+    && rm -rf /var/lib/apt/lists/* \
+    && curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh
 
 WORKDIR /app
 
@@ -28,11 +29,11 @@ RUN mkdir -p telonyx_cinema_bot && touch telonyx_cinema_bot/__init__.py && \
 RUN git clone https://github.com/makiisthenes/TiktokAutoUploader.git /opt/tiktok-autouploader && \
     cd /opt/tiktok-autouploader && \
     pip install --no-cache-dir -r requirements.txt && \
-    cd tiktok_uploader/tiktok-signature && \
-    npm install && \
-    npx playwright install chromium
+    cd tiktok_uploader/tiktok-signature && npm install
 
 ENV PYTHONPATH="/opt/tiktok-autouploader"
+ENV PLAYWRIGHT_BROWSERS_PATH="0"
+ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH="/usr/bin/google-chrome"
 
 # Layer 4: source code (fast, only this busts on code changes)
 COPY . .
