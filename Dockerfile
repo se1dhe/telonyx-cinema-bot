@@ -3,7 +3,7 @@ FROM python:3.12-slim AS base
 # Layer 1: system dependencies (cached unless apt changes)
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-      curl ca-certificates gnupg unzip \
+      curl ca-certificates gnupg unzip git \
       libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 \
       libcups2 libdrm2 libdbus-1-3 libxkbcommon0 \
       libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
@@ -32,7 +32,7 @@ RUN git clone https://github.com/makiisthenes/TiktokAutoUploader.git /opt/tiktok
     npm install && \
     npx playwright install chromium
 
-ENV PYTHONPATH="/opt/tiktok-autouploader:${PYTHONPATH}"
+ENV PYTHONPATH="/opt/tiktok-autouploader"
 
 # Layer 4: source code (fast, only this busts on code changes)
 COPY . .
