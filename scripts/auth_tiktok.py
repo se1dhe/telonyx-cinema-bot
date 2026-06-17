@@ -37,16 +37,24 @@ def main() -> None:
     try:
         from phantomwright.sync_api import sync_playwright
         from phantomwright.stealth import Stealth
-        from phantomwright.user_simulator import SyncUserSimulator
 
         with sync_playwright() as pw:
-            browser = pw.chromium.launch(headless=False)
+            stealth = Stealth(navigator_languages_override=("en-US", "en"))
+            browser = pw.chromium.launch(
+                headless=False,
+                args=[
+                    "--disable-blink-features=AutomationControlled",
+                    "--no-sandbox",
+                    "--disable-infobars",
+                    "--disable-dev-shm-usage",
+                ],
+            )
             context = browser.new_context(
-                viewport={"width": 1280, "height": 720},
+                viewport={"width": 1280, "height": 900},
                 locale="en-US",
                 timezone_id="America/New_York",
             )
-            Stealth(context)
+            stealth.apply_stealth_sync(context)
             page = context.new_page()
 
             print("Открываю страницу загрузки TikTok...")
