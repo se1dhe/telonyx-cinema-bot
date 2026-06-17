@@ -136,25 +136,31 @@ class EditorialService:
             logger.info("Skipping publish: autopublish disabled or paused (control=%s, now=%s)", control.autopublish_enabled, now)
             return None
 
-        post = await self._next_ready_post(now)
-        if post is None:
-            post = await self._ensure_fallback_post(now)
-        if post is None:
-            logger.info("No posts ready or eligible for fallback")
-            return None
+        while True:
+            post = await self._next_ready_post(now)
+            if post is None:
+                post = await self._ensure_fallback_post(now)
+            if post is None:
+                logger.info("No posts ready or eligible for fallback")
+                return None
 
-        if post.post_type == EditorialPostType.news and not self._news_interval_elapsed(control, now):
-            logger.info("Skipping news post %s: news interval not elapsed", post.id)
-            return None
-        if post.image_url is None and post.post_type in {
-            EditorialPostType.news,
-            EditorialPostType.review,
-            EditorialPostType.selection,
-        }:
-            logger.info("Skipping %s post %s: no image_url", post.post_type, post.id)
-            post.status = EditorialPostStatus.skipped
-            await self.session.flush()
-            return None
+            if post.post_type == EditorialPostType.news and not self._news_interval_elapsed(control, now):
+                logger.info("Skipping news post %s: news interval not elapsed", post.id)
+                post.status = EditorialPostStatus.skipped
+                await self.session.flush()
+                continue
+
+            if post.image_url is None and post.post_type in {
+                EditorialPostType.news,
+                EditorialPostType.review,
+                EditorialPostType.selection,
+            }:
+                logger.info("Skipping %s post %s: no image_url", post.post_type, post.id)
+                post.status = EditorialPostStatus.skipped
+                await self.session.flush()
+                continue
+
+            break
 
         try:
             msg_id = await self._publish_post(publisher, post)
