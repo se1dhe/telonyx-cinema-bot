@@ -24,8 +24,15 @@ RUN mkdir -p telonyx_cinema_bot && touch telonyx_cinema_bot/__init__.py && \
     pip install --no-cache-dir -e . && \
     pip install --no-cache-dir "yt-dlp[default]"
 
-# Layer 3: Chromium for tiktokautouploader (cached unless re-build)
-RUN phantomwright_driver install chromium
+# Layer 3: TikTokAutoUploader v2 (request-based, no Selenium)
+RUN git clone https://github.com/makiisthenes/TiktokAutoUploader.git /opt/tiktok-autouploader && \
+    cd /opt/tiktok-autouploader && \
+    pip install --no-cache-dir -r requirements.txt && \
+    cd tiktok_uploader/tiktok-signature && \
+    npm install && \
+    npx playwright install chromium
+
+ENV PYTHONPATH="/opt/tiktok-autouploader:${PYTHONPATH}"
 
 # Layer 4: source code (fast, only this busts on code changes)
 COPY . .
