@@ -25,37 +25,13 @@ def _ass_escape_path(path: Path) -> str:
 def _style_block() -> str:
     return """[V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: TitleBlock,DejaVu Sans,48,&H00F6F2EA,&H000000FF,&HAA000000,&H00000000,-1,0,0,0,100,100,0,0,1,1,0.4,7,0,0,0,1
-Style: Axis,DejaVu Sans,16,&H66EED322,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1
+Style: Watermark,DejaVu Sans,28,&H44F6F2EA,&H000000FF,&H00000000,&H64000000,0,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1
 """
 
 
-def ass_time_to_ms(t: str) -> float:
-    parts = t.split(":")
-    h, m, s_cs = int(parts[0]), int(parts[1]), parts[2]
-    s, cs = s_cs.split(".")
-    return (h * 3600 + m * 60 + int(s)) * 1000 + int(cs) * 10
-
-
-def generate_title_ass(movie_title: str, movie_year: str, movie_genre: str, duration: float) -> str:
-    title = str(movie_title).strip().upper() or "MOVIE"
-    year = str(movie_year).strip() or "YEAR"
-    genre = str(movie_genre).strip().split(",")[0].strip().upper() if movie_genre else ""
-
-    hold_end = 4.5
-    slide_in_dur = 0.76
-    exit_start = hold_end - 0.85
-    axis_y = 1507
-    title_y = 1504
-
-    genre_line = f"\\N{{\\fs26\\fsp2.8\\c&H00EED322&\\bord0.75}}{genre}" if genre else ""
-    year_line = f"\\N{{\\fs30\\fsp3.4\\c&H00EED322&\\bord0.85}}{year}" if year and year != "YEAR" else ""
-
+def generate_watermark_ass(duration: float) -> str:
     t0 = ass_time(0)
-    t_hold = ass_time(hold_end)
-
-    exit_ms = int(exit_start * 1000)
-    hold_end_ms = int(hold_end * 1000)
+    tend = ass_time(duration)
 
     lines = [
         "[Script Info]",
@@ -67,26 +43,8 @@ def generate_title_ass(movie_title: str, movie_year: str, movie_genre: str, dura
         _style_block(),
         "[Events]",
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+        f"Dialogue: 0,{t0},{tend},Watermark,,0,0,0,,{{\\an3\\fad(300,300)}}@telonyx_cinema",
     ]
-
-    # axis line
-    lines.append(
-        f"Dialogue: 1,{t0},{t_hold},Axis,,0,0,0,,"
-        f"{{\\move(-120,{axis_y},74,{axis_y},0,{int(slide_in_dur*1000)})"
-        f"\\t({exit_ms},{hold_end_ms},\\move(74,{axis_y},-120,{axis_y}))"
-        f"\\fad(120,160)}}{{\\p1}}m 0 0 l 4 0 l 4 116 l 0 116{{\\p0}}"
-    )
-
-    # title block
-    lines.append(
-        f"Dialogue: 3,{t0},{t_hold},TitleBlock,,0,0,0,,"
-        f"{{\\an7\\move(-920,{title_y},96,{title_y},0,{int(slide_in_dur*1000)})"
-        f"\\t({exit_ms},{hold_end_ms},\\move(96,{title_y},-920,{title_y}))"
-        f"\\blur0.08\\fad(120,160)}}"
-        f"{{\\fs58\\fsp0.25\\c&H00F6F2EA&\\bord1.65}}{title}"
-        f"{genre_line}"
-        f"{year_line}"
-    )
 
     return "\n".join(lines)
 
@@ -136,13 +94,10 @@ async def render_with_overlay(
     input_path: Path,
     output_path: Path,
     work_dir: Path,
-    movie_title: str,
-    movie_year: str,
-    movie_genre: str,
 ) -> None:
     duration = await probe_duration(ffprobe_bin, input_path)
-    ass_path = work_dir / "title.ass"
-    ass_path.write_text(generate_title_ass(movie_title, movie_year, movie_genre, duration), encoding="utf-8")
+    ass_path = work_dir / "watermark.ass"
+    ass_path.write_text(generate_watermark_ass(duration), encoding="utf-8")
 
     cmd = [
         ffmpeg_bin, "-y",

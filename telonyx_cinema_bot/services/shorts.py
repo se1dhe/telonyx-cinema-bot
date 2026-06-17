@@ -161,9 +161,6 @@ async def process_shorts_item(
             input_path=video_path,
             output_path=output_path,
             work_dir=work_dir,
-            movie_title=item.movie_title or "",
-            movie_year=item.movie_year or "",
-            movie_genre=item.movie_genre or "",
         )
 
         description = await copywriter.generate_shorts_description(
