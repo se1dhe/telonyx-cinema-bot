@@ -247,7 +247,7 @@ async def process_shorts_item(
                 item.admin_msg_id = msg.message_id
 
     finally:
-        await session.flush()
+        await session.commit()
 
 
 async def _enqueue_movie_fact(

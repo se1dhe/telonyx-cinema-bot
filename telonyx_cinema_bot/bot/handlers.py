@@ -326,7 +326,22 @@ def build_router(
 
         async with session_factory() as session:
             async with session.begin():
-                item = ShortsQueue(url=url, status=ShortsQueueStatus.pending)
+                from sqlalchemy import select
+                from datetime import timedelta
+
+                last_time = await session.scalar(
+                    select(ShortsQueue.scheduled_for)
+                    .where(ShortsQueue.status.in_([ShortsQueueStatus.pending, ShortsQueueStatus.published]))
+                    .order_by(ShortsQueue.scheduled_for.desc())
+                    .limit(1)
+                )
+                now = datetime.now(settings.zoneinfo)
+                if last_time and last_time > now:
+                    next_slot = last_time + timedelta(minutes=settings.shorts_interval_minutes)
+                else:
+                    next_slot = now
+
+                item = ShortsQueue(url=url, status=ShortsQueueStatus.pending, scheduled_for=next_slot)
                 session.add(item)
                 await session.flush()
                 item_id = item.id
@@ -352,12 +367,30 @@ def build_router(
         item_id = int(callback.data.split(":")[2])
         async with session_factory() as session:
             async with session.begin():
+                from sqlalchemy import select
+                from datetime import timedelta
+
                 item = await session.get(ShortsQueue, item_id)
                 if item is None:
                     await callback.answer("Запись не найдена.", show_alert=True)
                     return
+
+                last_slot = await session.scalar(
+                    select(ShortsQueue.scheduled_for)
+                    .where(ShortsQueue.status.in_([ShortsQueueStatus.pending, ShortsQueueStatus.published]))
+                    .where(ShortsQueue.id != item_id)
+                    .order_by(ShortsQueue.scheduled_for.desc())
+                    .limit(1)
+                )
+                now = datetime.now(settings.zoneinfo)
+                if last_slot and last_slot > now:
+                    next_slot = last_slot + timedelta(minutes=settings.shorts_interval_minutes)
+                else:
+                    next_slot = now
+
                 item.status = ShortsQueueStatus.pending
                 item.error_message = None
+                item.scheduled_for = next_slot
 
         if callback.message:
             await _replace_callback_message(

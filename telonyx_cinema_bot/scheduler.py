@@ -128,21 +128,11 @@ async def _run_shorts_queue(
 
     async with session_factory() as session:
         async with session.begin():
-            last_published = await session.scalar(
-                select(ShortsQueue.published_at)
-                .where(ShortsQueue.status == ShortsQueueStatus.published)
-                .order_by(ShortsQueue.published_at.desc())
-                .limit(1)
-            )
-            if last_published is not None:
-                elapsed = datetime.now(settings.zoneinfo) - last_published
-                if elapsed < timedelta(minutes=settings.shorts_interval_minutes):
-                    return
-
             result = await session.execute(
                 select(ShortsQueue)
                 .where(ShortsQueue.status == ShortsQueueStatus.pending)
-                .order_by(ShortsQueue.created_at)
+                .where(ShortsQueue.scheduled_for <= datetime.now(settings.zoneinfo))
+                .order_by(ShortsQueue.scheduled_for, ShortsQueue.created_at)
                 .limit(1)
             )
             item = result.scalar_one_or_none()
