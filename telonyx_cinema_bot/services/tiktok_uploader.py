@@ -43,6 +43,7 @@ async def upload_to_tiktok(video_path: Path, description: str, account_name: str
                 headless=True,
                 stealth=True,
                 suppressprint=False,
+                copyrightcheck=True,
             )
             tk_upload(**kwargs)
             return True
