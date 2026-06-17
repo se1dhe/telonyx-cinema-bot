@@ -7,49 +7,14 @@ logger = logging.getLogger(__name__)
 
 BADGE_SIZE = 34
 BADGE_APPEAR = 0.8
-TEXT_APPEAR = 1.8
-FADE_IN = 500
-FADE_OUT = 300
-BADGE_Y_OFFSET = 190
-TEXT_MARGIN_V = 130
+TEXT_APPEAR = 1.6
 
-
-def ass_time(seconds: float) -> str:
-    seconds = max(0.0, seconds)
-    h = int(seconds // 3600)
-    m = int((seconds % 3600) // 60)
-    s = int(seconds % 60)
-    cs = int(round((seconds - int(seconds)) * 100))
-    if cs >= 100:
-        s += 1
-        cs = 0
-    return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
-
-
-def _ass_escape_path(path: Path) -> str:
-    return str(path).replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
-
-
-def generate_watermark_ass(duration: float) -> str:
-    t0 = ass_time(TEXT_APPEAR)
-    tend = ass_time(duration)
-
-    lines = [
-        "[Script Info]",
-        "ScriptType: v4.00+",
-        "PlayResX: 1080",
-        "PlayResY: 1920",
-        "ScaledBorderAndShadow: yes",
-        "",
-        "[V4+ Styles]",
-        "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
-        f"Style: Watermark,DejaVu Sans,40,&H00FFFFFF,&H000000FF,&H00CC8800,&H40000000,1,0,0,0,100,100,2,0,1,2.5,1.5,2,0,0,{TEXT_MARGIN_V},1",
-        "[Events]",
-        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
-        f"Dialogue: 0,{t0},{tend},Watermark,,0,0,0,,{{\\an2\\fad({FADE_IN},{FADE_OUT})}}@telonyx_cinema",
-    ]
-
-    return "\n".join(lines)
+FONT_FILE = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+TEXT = "@telonyx_cinema"
+FONT_SIZE = 40
+TEXT_Y = "H-96"
+BADGE_X = "W/2-200"
+BADGE_Y = "H-96"
 
 
 def generate_badge_png(path: Path, size: int = BADGE_SIZE) -> None:
@@ -75,7 +40,6 @@ def generate_badge_png(path: Path, size: int = BADGE_SIZE) -> None:
 
 async def render_with_overlay(
     ffmpeg_bin: str,
-    ffprobe_bin: str,
     input_path: Path,
     output_path: Path,
     work_dir: Path,
@@ -84,17 +48,10 @@ async def render_with_overlay(
 
     loop = asyncio.get_running_loop()
 
-    duration = await loop.run_in_executor(None, _probe_duration, ffprobe_bin, input_path)
-
-    ass_path = work_dir / "watermark.ass"
-    ass_path.write_text(generate_watermark_ass(duration), encoding="utf-8")
-
     badge_path = work_dir / "badge.png"
     await loop.run_in_executor(None, generate_badge_png, badge_path)
 
-    ass_esc = _ass_escape_path(ass_path)
-    badge_x = f"W/2-{BADGE_SIZE//2}"
-    badge_y = f"H-{BADGE_Y_OFFSET}"
+    alpha_expr = f"if(gte(t,{TEXT_APPEAR}),min(1,(t-{TEXT_APPEAR})/0.3),0)"
 
     cmd = [
         ffmpeg_bin, "-y",
@@ -104,9 +61,23 @@ async def render_with_overlay(
         "-filter_complex", (
             f"[0:v]eq=contrast=1.07:saturation=1.08:brightness=-0.018,"
             f"unsharp=5:5:0.55:3:3:0.25,"
-            f"subtitles='{ass_esc}'[v];"
+            f"format=rgba[v];"
             f"[1:v]format=rgba,setpts=PTS+{BADGE_APPEAR}/TB[badge];"
-            f"[v][badge]overlay=x={badge_x}:y={badge_y}:shortest=1[out]"
+            f"[v][badge]overlay=x={BADGE_X}:y={BADGE_Y}:shortest=1,"
+            f"drawtext="
+            f"text='{TEXT}':"
+            f"x=(w-text_w)/2:"
+            f"y={TEXT_Y}:"
+            f"fontsize={FONT_SIZE}:"
+            f"fontcolor=white:"
+            f"borderw=2.5:"
+            f"bordercolor=#0088CC:"
+            f"shadowx=2:shadowy=2:"
+            f"shadowcolor=black@0.4:"
+            f"fontfile={FONT_FILE}:"
+            f"enable='gte(t,{TEXT_APPEAR})':"
+            f"alpha='{alpha_expr}'"
+            f"[out]"
         ),
         "-map", "[out]", "-map", "0:a?",
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
@@ -132,19 +103,4 @@ async def _run_ffmpeg(cmd: list[str]) -> None:
     _, stderr = await proc.communicate()
     if proc.returncode != 0:
         raise RuntimeError(f"FFmpeg failed:\n{stderr.decode()[-2000:]}")
-
-
-def _probe_duration(ffprobe_bin: str, path: Path) -> float:
-    import subprocess
-
-    result = subprocess.run(
-        [ffprobe_bin, "-v", "error", "-show_entries", "format=duration",
-         "-of", "default=nw=1:nk=1", str(path)],
-        capture_output=True, text=True,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(f"ffprobe failed: {result.stderr[-1000:]}")
-    try:
-        return max(0.1, float(result.stdout.strip()))
-    except ValueError:
-        return 0.1
+    

@@ -160,7 +160,6 @@ async def process_shorts_item(
         output_path = work_dir / "final.mp4"
         await render_with_overlay(
             ffmpeg_bin=settings.ffmpeg_bin,
-            ffprobe_bin=settings.ffprobe_bin,
             input_path=video_path,
             output_path=output_path,
             work_dir=work_dir,
