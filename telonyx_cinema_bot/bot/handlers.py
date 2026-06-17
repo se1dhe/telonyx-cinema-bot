@@ -335,7 +335,7 @@ def build_router(
                     .order_by(ShortsQueue.scheduled_for.desc())
                     .limit(1)
                 )
-                now = datetime.now(settings.zoneinfo)
+                now = datetime.datetime.now(settings.zoneinfo)
                 if last_time and last_time > now:
                     next_slot = last_time + timedelta(minutes=settings.shorts_interval_minutes)
                 else:
@@ -382,7 +382,7 @@ def build_router(
                     .order_by(ShortsQueue.scheduled_for.desc())
                     .limit(1)
                 )
-                now = datetime.now(settings.zoneinfo)
+                now = datetime.datetime.now(settings.zoneinfo)
                 if last_slot and last_slot > now:
                     next_slot = last_slot + timedelta(minutes=settings.shorts_interval_minutes)
                 else:
