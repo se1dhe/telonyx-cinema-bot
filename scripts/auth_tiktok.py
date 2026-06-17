@@ -1,9 +1,7 @@
-"""Одноразовый скрипт: сохраняет куки TikTok из твоего реального Chrome.
+"""Сохраняет TikTok-сессию из твоего реального Chrome.
 
-Не открывает новый браузер — использует твой собственный Chrome,
-в котором ты уже залогинен в TikTok.
-
-Если Chrome вдруг закрыт — скрипт сам его откроет.
+Открывает твой собственный Chrome с твоими профилем и куками
+(закрыть Chrome перед запуском не обязательно — запускается копия).
 
 Использование:
   python scripts/auth_tiktok.py <account_name> [storage_dir]
@@ -16,8 +14,7 @@ import time
 from pathlib import Path
 
 
-LOGIN_URL = "https://www.tiktok.com/login"
-UPLOAD_URL = "https://www.tiktok.com/tiktokstudio/upload?from=upload&lang=en"
+CHROME_USER_DATA = str(Path.home() / "Library" / "Application Support" / "Google" / "Chrome")
 
 
 def main() -> None:
@@ -30,6 +27,21 @@ def main() -> None:
     tiktok_data = storage_dir / "tiktok"
     tiktok_data.mkdir(parents=True, exist_ok=True)
 
+    apps = [
+        ("Google Chrome", Path(CHROME_USER_DATA)),
+    ]
+
+    chosen_profile = None
+    for name, path in apps:
+        if path.exists():
+            chosen_profile = path
+            print(f"Найден профиль Chrome: {path}")
+            break
+
+    if not chosen_profile:
+        print("❌ Профиль Chrome не найден. Убедитесь что Chrome установлен.")
+        sys.exit(1)
+
     original_cwd = os.getcwd()
     os.chdir(str(tiktok_data))
     print(f"Куки будут сохранены в: {tiktok_data}")
@@ -38,15 +50,21 @@ def main() -> None:
         from phantomwright.sync_api import sync_playwright
 
         with sync_playwright() as pw:
-            browser = pw.chromium.launch(
+            context = pw.chromium.launch_persistent_context(
+                user_data_dir=str(chosen_profile),
                 channel="chrome",
                 headless=False,
-                args=["--no-sandbox"],
+                args=[
+                    "--no-sandbox",
+                    "--disable-blink-features=AutomationControlled",
+                ],
+                viewport={"width": 1280, "height": 900},
+                locale="en-US",
+                timezone_id="America/New_York",
             )
-            context = browser.new_context()
-            page = context.new_page()
+            page = context.pages[0] if context.pages else context.new_page()
 
-            print("Открываю TikTok в твоём Chrome...")
+            print("Открываю TikTok...")
             page.goto("https://www.tiktok.com", timeout=60000)
             time.sleep(3)
             print("Текущий URL:", page.url)
@@ -64,7 +82,7 @@ def main() -> None:
 
             cookies = context.cookies()
             if not cookies:
-                print("⚠️ Куки не найдены — возможно, не удалось войти.")
+                print("⚠️ Куки не найдены.")
             else:
                 filename = f"TK_cookies_{account_name}.json"
                 with open(filename, "w") as f:
@@ -73,7 +91,6 @@ def main() -> None:
                 print(f"   Файл: {tiktok_data / filename}")
 
             context.close()
-            browser.close()
     except Exception:
         import traceback
         traceback.print_exc()
