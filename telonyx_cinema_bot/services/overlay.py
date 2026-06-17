@@ -40,15 +40,16 @@ def ass_time_to_ms(t: str) -> float:
 def generate_title_ass(movie_title: str, movie_year: str, movie_genre: str, duration: float) -> str:
     title = str(movie_title).strip().upper() or "MOVIE"
     year = str(movie_year).strip() or "YEAR"
-    genre = str(movie_genre).strip().split(",")[0].strip() if movie_genre else ""
+    genre = str(movie_genre).strip().split(",")[0].strip().upper() if movie_genre else ""
 
-    hold_end = max(3.0, duration * 0.8)
+    hold_end = 4.5
     slide_in_dur = 0.76
-    exit_start = max(hold_end - 0.85, 4.0)
+    exit_start = hold_end - 0.85
     axis_y = 1507
     title_y = 1504
 
     genre_line = f"\\N{{\\fs26\\fsp2.8\\c&H00EED322&\\bord0.75}}{genre}" if genre else ""
+    year_line = f"\\N{{\\fs30\\fsp3.4\\c&H00EED322&\\bord0.85}}{year}" if year and year != "YEAR" else ""
 
     t0 = ass_time(0)
     t_hold = ass_time(hold_end)
@@ -81,10 +82,10 @@ def generate_title_ass(movie_title: str, movie_year: str, movie_genre: str, dura
         f"Dialogue: 3,{t0},{t_hold},TitleBlock,,0,0,0,,"
         f"{{\\an7\\move(-920,{title_y},96,{title_y},0,{int(slide_in_dur*1000)})"
         f"\\t({exit_ms},{hold_end_ms},\\move(96,{title_y},-920,{title_y}))"
-        f"\\blur0.08\\fad(120,{int((duration-hold_end+2)*1000)})}}"
-        f"{{\\fs18\\fsp2.4\\c&H9CFFFFFF&\\bord0.35}}TELONYX.APP"
-        f"\\N{{\\fs58\\fsp0.25\\c&H00F6F2EA&\\bord1.65}}{title}"
-        f"\\N{{\\fs30\\fsp3.4\\c&H00EED322&\\bord0.85}}{year}{genre_line}"
+        f"\\blur0.08\\fad(120,160)}}"
+        f"{{\\fs58\\fsp0.25\\c&H00F6F2EA&\\bord1.65}}{title}"
+        f"{genre_line}"
+        f"{year_line}"
     )
 
     return "\n".join(lines)

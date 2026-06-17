@@ -1,13 +1,11 @@
 from __future__ import annotations
 
+import base64
 import json
 import logging
-import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-
-import yt_dlp
 
 from telonyx_cinema_bot.config import Settings
 from telonyx_cinema_bot.models import ShortsQueue, ShortsQueueStatus
@@ -18,16 +16,54 @@ from telonyx_cinema_bot.services.tmdb import TMDbClient
 
 logger = logging.getLogger(__name__)
 
+_COOKIES_PATH: Path | None = None
 
-async def extract_yt_metadata(url: str, yt_dlp_bin: str) -> dict[str, Any] | None:
+
+def init_cookies_file(settings: Settings) -> str | None:
+    global _COOKIES_PATH
+    if _COOKIES_PATH is not None:
+        return str(_COOKIES_PATH)
+
+    if settings.yt_dlp_cookies_file:
+        _COOKIES_PATH = Path(settings.yt_dlp_cookies_file)
+        if _COOKIES_PATH.exists():
+            return str(_COOKIES_PATH)
+        logger.warning("YT_DLP_COOKIES_FILE %s not found", _COOKIES_PATH)
+        _COOKIES_PATH = None
+
+    if settings.yt_dlp_cookies_base64:
+        try:
+            decoded = base64.b64decode(settings.yt_dlp_cookies_base64).decode("utf-8")
+            path = Path(settings.storage_dir) / "yt-dlp-cookies.txt"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(decoded, encoding="utf-8")
+            path.chmod(0o600)
+            _COOKIES_PATH = path
+            logger.info("Decoded YT_DLP_COOKIES_BASE64 to %s", path)
+            return str(path)
+        except Exception:
+            logger.exception("Failed to decode YT_DLP_COOKIES_BASE64")
+
+    return None
+
+
+def _cookies_args(cookies_path: str | None) -> list[str]:
+    if cookies_path:
+        return ["--cookies", cookies_path]
+    return []
+
+
+async def extract_yt_metadata(url: str, yt_dlp_bin: str, *, cookies: str | None = None) -> dict[str, Any] | None:
     cmd = [
         yt_dlp_bin,
         "--dump-single-json",
         "--skip-download",
         "--no-playlist",
         "--no-warnings",
-        url,
+        "--remote-components", "ejs:npm",
     ]
+    cmd.extend(_cookies_args(cookies))
+    cmd.append(url)
     proc = await asyncio_subprocess(cmd)
     try:
         return json.loads(proc)
@@ -50,17 +86,19 @@ async def asyncio_subprocess(cmd: list[str]) -> str:
     return stdout.decode().strip()
 
 
-async def download_video(url: str, output_dir: Path, yt_dlp_bin: str) -> Path:
+async def download_video(url: str, output_dir: Path, yt_dlp_bin: str, *, cookies: str | None = None) -> Path:
     output_template = str(output_dir / "%(id)s.%(ext)s")
     cmd = [
         yt_dlp_bin,
         "--no-playlist",
         "--merge-output-format", "mp4",
         "--remux-video", "mp4",
+        "--remote-components", "ejs:npm",
         "--format", "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080]",
         "--output", output_template,
-        url,
     ]
+    cmd.extend(_cookies_args(cookies))
+    cmd.append(url)
     logger.info("Downloading video: %s", " ".join(cmd))
     await asyncio_subprocess(cmd)
 
@@ -68,38 +106,6 @@ async def download_video(url: str, output_dir: Path, yt_dlp_bin: str) -> Path:
         if f.suffix in (".mp4", ".mkv", ".webm") and not f.name.startswith("."):
             return f
     raise RuntimeError("No video file found after download")
-
-
-def parse_movie_from_title(raw_title: str) -> str:
-    cleaned = re.sub(r"#\S+", "", raw_title)
-    cleaned = re.sub(r"@\S+", "", cleaned)
-    cleaned = re.sub(r"(shorts|youtube|ytshorts)", "", cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r"[|–—\-•·]", " ", cleaned)
-    cleaned = re.sub(r"\s+", " ", cleaned).strip()
-    for prefix in ["обзор", "реакция", "разбор", "кинопересказ", "кино", "фильм", "момент из"]:
-        cleaned = re.sub(rf"^{prefix}\s+", "", cleaned, flags=re.IGNORECASE)
-    return cleaned.strip()[:120]
-
-
-async def generate_shorts_description(
-    movie_title: str,
-    movie_year: str,
-    movie_genre: str,
-    copywriter: GeminiCopywriter,
-) -> str:
-    prompt = (
-        "Напиши короткое описание для поста в Telegram с кино-видео.\n"
-        "Формат:\n"
-        f"{movie_title} | краткое описание момента 🔥 Наш тг: @telonyx_cinema\n\n"
-        "Потом добавь 5-7 виральных хештегов по теме (на русском и английском, через пробел).\n"
-        f"Фильм: {movie_title} ({movie_year}), жанр: {movie_genre}.\n"
-        "Только текст и хештеги, без лишнего."
-    )
-    try:
-        text = await copywriter._generate_text(prompt)
-        return text.strip()
-    except Exception:
-        return f"{movie_title} | 🔥 Наш тг: @telonyx_cinema\n#кино #фильм #telonyxcinema"
 
 
 async def process_shorts_item(
@@ -120,27 +126,30 @@ async def process_shorts_item(
     work_dir = Path(settings.storage_dir) / "shorts" / str(item_id)
     work_dir.mkdir(parents=True, exist_ok=True)
 
+    cookies_path = init_cookies_file(settings)
+
     try:
         item.status = ShortsQueueStatus.downloading
         await session.flush()
 
-        video_path = await download_video(item.url, work_dir, settings.yt_dlp_bin)
+        video_path = await download_video(item.url, work_dir, settings.yt_dlp_bin, cookies=cookies_path)
 
         if not item.movie_title:
-            raw_meta = yt_dlp.YoutubeDL().extract_info(item.url, download=False)
-            raw_title = raw_meta.get("title", "")
-            parsed = parse_movie_from_title(raw_title)
+            raw_meta = await extract_yt_metadata(item.url, settings.yt_dlp_bin, cookies=cookies_path)
+            raw_title = (raw_meta or {}).get("title", "") or ""
+            ai_title = await copywriter.identify_movie_from_title(raw_title)
             tmdb = TMDbClient(settings.tmdb_api_key)
-            movie = await tmdb.search_best_match(parsed)
+            movie = await tmdb.search_best_match(ai_title)
             if movie:
                 item.movie_title = movie.title
                 item.movie_year = str(movie.release_year or "")
                 item.movie_genre = movie.genres[0] if movie.genres else ""
                 item.tmdb_id = movie.tmdb_id
             else:
-                item.movie_title = parsed
+                item.movie_title = ai_title
                 item.movie_year = ""
                 item.movie_genre = ""
+            item.yt_raw_title = raw_title
 
         item.status = ShortsQueueStatus.rendering
         await session.flush()
@@ -157,11 +166,11 @@ async def process_shorts_item(
             movie_genre=item.movie_genre or "",
         )
 
-        description = await generate_shorts_description(
-            item.movie_title or "",
-            item.movie_year or "",
-            item.movie_genre or "",
-            copywriter,
+        description = await copywriter.generate_shorts_description(
+            raw_title=item.yt_raw_title or item.movie_title or "",
+            movie_title=item.movie_title or "",
+            movie_year=item.movie_year or "",
+            movie_genre=item.movie_genre or "",
         )
 
         item.status = ShortsQueueStatus.ready
@@ -209,6 +218,9 @@ async def process_shorts_item(
                 disable_web_page_preview=True,
             )
 
+        if item.movie_title:
+            await _enqueue_movie_fact(item, session, settings, copywriter)
+
     except Exception as exc:
         logger.exception("Failed to process shorts item %s", item_id)
         item.status = ShortsQueueStatus.failed
@@ -236,3 +248,54 @@ async def process_shorts_item(
 
     finally:
         await session.flush()
+
+
+async def _enqueue_movie_fact(
+    item: ShortsQueue,
+    session: Any,
+    settings: Settings,
+    copywriter: GeminiCopywriter,
+) -> None:
+    from telonyx_cinema_bot.models import EditorialPostType
+    from telonyx_cinema_bot.services.editorial import EditorialService
+    from telonyx_cinema_bot.services.tmdb import MovieMetadata
+
+    try:
+        movie = MovieMetadata(
+            tmdb_id=item.tmdb_id or 0,
+            title=item.movie_title or "",
+            original_title="",
+            release_year=int(item.movie_year) if item.movie_year and item.movie_year.isdigit() else None,
+            overview="",
+            poster_path="",
+            imdb_id="",
+            imdb_rating="",
+            genres=[item.movie_genre] if item.movie_genre else [],
+            similar_movies=[],
+            raw_metadata={},
+        )
+
+        if item.tmdb_id:
+            from telonyx_cinema_bot.models import Film
+
+            film = await session.get(Film, item.tmdb_id)
+            if film and film.poster_path:
+                movie.poster_path = film.poster_path
+
+        fact_text = await copywriter.generate_fact(movie)
+        if not fact_text:
+            return
+
+        editorial = EditorialService(session, settings, copywriter)
+        await editorial.enqueue_post(
+            post_type=EditorialPostType.discussion,
+            title=f"🎬 Факт о фильме: {item.movie_title}",
+            text=f"<b>{item.movie_title}</b>\n\n{fact_text}",
+            hashtags=["#кино", "#интересныйфакт", "#кинофакт"],
+            image_url=movie.poster_url,
+            metadata={"tmdb_id": item.tmdb_id, "source": "shorts", "shorts_item_id": item.id},
+            scheduled_for=None,
+        )
+        logger.info("Enqueued fact post for %s", item.movie_title)
+    except Exception:
+        logger.exception("Failed to enqueue movie fact for %s", item.movie_title)

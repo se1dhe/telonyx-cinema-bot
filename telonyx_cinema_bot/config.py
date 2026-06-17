@@ -30,6 +30,8 @@ class Settings(BaseSettings):
     storage_dir: str = Field(default="/data/storage", alias="STORAGE_DIR")
     shorts_interval_minutes: int = Field(default=60, alias="SHORTS_INTERVAL_MINUTES")
     tiktok_account_name: str | None = Field(default=None, alias="TIKTOK_ACCOUNT_NAME")
+    yt_dlp_cookies_base64: str | None = Field(default=None, alias="YT_DLP_COOKIES_BASE64")
+    yt_dlp_cookies_file: str | None = Field(default=None, alias="YT_DLP_COOKIES_FILE")
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore", populate_by_name=True)
 

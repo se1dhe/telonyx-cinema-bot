@@ -80,6 +80,49 @@ class GroqCopywriter:
             self._log_generation_error("fact", exc)
             return await self.fallback.generate_fact(movie)
 
+    async def identify_movie_from_title(self, raw_title: str) -> str:
+        prompt = (
+            "Ты — эксперт по кино. Определи, какой фильм или сериал имеется в виду "
+            "по заголовку YouTube-видео. Верни ТОЛЬКО официальное русское название фильма/сериала. "
+            "Если не уверен — верни оригинальный заголовок как есть.\n\n"
+            f"Заголовок: {raw_title}"
+        )
+        try:
+            return await self._generate_text(prompt)
+        except Exception as exc:
+            self._log_generation_error("movie identification", exc)
+            return raw_title
+
+    async def generate_shorts_description(
+        self,
+        raw_title: str,
+        movie_title: str,
+        movie_year: str,
+        movie_genre: str,
+    ) -> str:
+        prompt = (
+            "Напиши виральное описание для YouTube Shorts в Telegram.\n"
+            "Формат:\n"
+            f"{movie_title} | краткое описание момента 🔥\n\n"
+            "Потом добавь 7-10 виральных хештегов через пробел — "
+            "смесь русских и английских, популярных в рекомендациях.\n"
+            "Обязательно включи: #кино #shorts #рек #рекомендации "
+            "и хештеги по названию фильма, жанру, году.\n\n"
+            f"Оригинальный заголовок: {raw_title}\n"
+            f"Фильм: {movie_title} ({movie_year}), жанр: {movie_genre}\n"
+            "Только текст, без лишних слов."
+        )
+        try:
+            text = await self._generate_text(prompt)
+            return text.strip()
+        except Exception as exc:
+            self._log_generation_error("shorts description", exc)
+            return (
+                f"{movie_title} | {raw_title} 🔥\n"
+                f"#кино #{movie_title.replace(' ', '').lower()} "
+                f"#shorts #рек #telonyxcinema"
+            )
+
     async def generate_recommendations(self, movie: MovieMetadata) -> str:
         similar = ", ".join(m["title"] for m in movie.similar_movies[:3])
         prompt = (

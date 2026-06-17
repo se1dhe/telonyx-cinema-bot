@@ -236,6 +236,7 @@ class ShortsQueue(Base):
     movie_year: Mapped[str | None] = mapped_column(String(16), nullable=True)
     movie_genre: Mapped[str | None] = mapped_column(String(255), nullable=True)
     tmdb_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    yt_raw_title: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     video_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     telegram_file_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
