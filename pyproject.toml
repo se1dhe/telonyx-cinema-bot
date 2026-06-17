@@ -16,6 +16,7 @@ dependencies = [
     "pydantic-settings>=2.2,<3",
     "sqlalchemy[asyncio]>=2.0,<3",
     "yt-dlp>=2025.0,<2026",
+    "tiktokautouploader>=6,<7",
 ]
 
 [project.optional-dependencies]

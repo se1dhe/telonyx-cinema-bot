@@ -218,7 +218,6 @@ class ShortsQueueStatus(str, enum.Enum):
     downloading = "downloading"
     rendering = "rendering"
     ready = "ready"
-    publishing_tiktok = "publishing_tiktok"
     published = "published"
     failed = "failed"
 
@@ -240,7 +239,6 @@ class ShortsQueue(Base):
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     video_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     telegram_file_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    tiktok_publish_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     admin_msg_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

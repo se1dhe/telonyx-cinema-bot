@@ -29,9 +29,7 @@ class Settings(BaseSettings):
     ffprobe_bin: str = Field(default="ffprobe", alias="FFPROBE_BIN")
     storage_dir: str = Field(default="/data/storage", alias="STORAGE_DIR")
     shorts_interval_minutes: int = Field(default=60, alias="SHORTS_INTERVAL_MINUTES")
-    tiktok_client_key: str | None = Field(default=None, alias="TIKTOK_CLIENT_KEY")
-    tiktok_client_secret: str | None = Field(default=None, alias="TIKTOK_CLIENT_SECRET")
-    tiktok_access_token: str | None = Field(default=None, alias="TIKTOK_ACCESS_TOKEN")
+    tiktok_account_name: str | None = Field(default=None, alias="TIKTOK_ACCOUNT_NAME")
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore", populate_by_name=True)
 

@@ -1,11 +1,9 @@
 {
   "$schema": "https://railway.com/railway.schema.json",
   "build": {
-    "builder": "RAILPACK"
+    "builder": "DOCKERFILE"
   },
   "deploy": {
-    "startCommand": "python -m telonyx_cinema_bot",
     "restartPolicyType": "ALWAYS"
   }
 }
-

@@ -13,7 +13,7 @@ from telonyx_cinema_bot.config import Settings
 from telonyx_cinema_bot.models import ShortsQueue, ShortsQueueStatus
 from telonyx_cinema_bot.services.gemini import GeminiCopywriter
 from telonyx_cinema_bot.services.overlay import render_with_overlay
-from telonyx_cinema_bot.services.tiktok import TikTokClient
+from telonyx_cinema_bot.services.tiktok_uploader import upload_to_tiktok
 from telonyx_cinema_bot.services.tmdb import TMDbClient
 
 logger = logging.getLogger(__name__)
@@ -167,23 +167,19 @@ async def process_shorts_item(
         item.status = ShortsQueueStatus.ready
         await session.flush()
 
-        if settings.tiktok_access_token:
-            item.status = ShortsQueueStatus.publishing_tiktok
-            await session.flush()
-
-            tiktok = TikTokClient(
-                access_token=settings.tiktok_access_token,
-                client_key=settings.tiktok_client_key,
-                client_secret=settings.tiktok_client_secret,
+        if settings.tiktok_account_name:
+            logger.info("Uploading to TikTok as %s", settings.tiktok_account_name)
+            storage_dir = Path(settings.storage_dir)
+            tiktok_ok = await upload_to_tiktok(
+                video_path=output_path,
+                description=description,
+                account_name=settings.tiktok_account_name,
+                storage_dir=storage_dir,
             )
-            try:
-                publish_id = await tiktok.publish_video(output_path, description)
-                item.tiktok_publish_id = publish_id
-                logger.info("TikTok publish initiated: %s", publish_id)
-            except Exception:
-                logger.exception("TikTok publish failed, continuing to Telegram")
-            finally:
-                await tiktok.close()
+            if tiktok_ok:
+                logger.info("TikTok upload complete")
+            else:
+                logger.warning("TikTok upload failed, continuing to Telegram")
 
         with open(output_path, "rb") as f:
             msg = await bot.send_video(
@@ -202,13 +198,10 @@ async def process_shorts_item(
         if item.admin_msg_id:
             from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-            tiktok_url = ""
-            if item.tiktok_publish_id:
-                tiktok_url = f"\n<a href='https://www.tiktok.com/@{settings.telegram_channel_id}/video/{item.tiktok_publish_id}'>TikTok</a>"
             await bot.edit_message_text(
                 chat_id=settings.admin_user_ids[0] if settings.admin_user_ids else 0,
                 message_id=item.admin_msg_id,
-                text=f"✅ Опубликовано: {item.movie_title}{tiktok_url}\n{msg.get_url()}",
+                text=f"✅ Опубликовано: {item.movie_title}\n{msg.get_url()}",
                 reply_markup=InlineKeyboardMarkup(
                     inline_keyboard=[[InlineKeyboardButton(text="📺 Посмотреть", url=msg.get_url())]]
                 ),
