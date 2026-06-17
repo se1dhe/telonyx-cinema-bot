@@ -19,10 +19,14 @@ from tiktokautouploader.function import UPLOAD_URL
 def main() -> None:
     if len(sys.argv) < 2:
         print("Использование: python scripts/auth_tiktok.py <account_name> [storage_dir]")
+        print("  account_name — логин или email от TikTok (например: my_tiktok_login)")
+        print("  storage_dir  — куда сохранить куки (по умолчанию ~/.telonyx/storage/)")
+        print("\nПосле входа файл куков будет в: ~/.telonyx/storage/tiktok/TK_cookies_{account}.json")
+        print("Его нужно будет загрузить в Railway по пути $STORAGE_DIR/tiktok/")
         sys.exit(1)
 
     account_name = sys.argv[1]
-    storage_dir = Path(sys.argv[2]) if len(sys.argv) > 2 else Path("/data/storage")
+    storage_dir = Path(sys.argv[2]) if len(sys.argv) > 2 else Path.home() / ".telonyx" / "storage"
     tiktok_data = storage_dir / "tiktok"
     tiktok_data.mkdir(parents=True, exist_ok=True)
 
