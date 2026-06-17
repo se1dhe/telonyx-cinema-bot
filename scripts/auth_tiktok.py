@@ -2,9 +2,6 @@
 
 Использование:
   python scripts/auth_tiktok.py <account_name> [storage_dir]
-
-После входа куки сохранятся в {storage_dir}/tiktok/TK_cookies_{account_name}.json.
-По умолчанию storage_dir = /data/storage.
 """
 
 import os
@@ -13,16 +10,16 @@ import json
 import time
 from pathlib import Path
 
-from tiktokautouploader.function import UPLOAD_URL
+
+LOGIN_URL = "https://www.tiktok.com/login"
+UPLOAD_URL = "https://www.tiktok.com/tiktokstudio/upload?from=upload&lang=en"
 
 
 def main() -> None:
     if len(sys.argv) < 2:
         print("Использование: python scripts/auth_tiktok.py <account_name> [storage_dir]")
-        print("  account_name — логин или email от TikTok (например: my_tiktok_login)")
+        print("  account_name — логин или email от TikTok")
         print("  storage_dir  — куда сохранить куки (по умолчанию ~/.telonyx/storage/)")
-        print("\nПосле входа файл куков будет в: ~/.telonyx/storage/tiktok/TK_cookies_{account}.json")
-        print("Его нужно будет загрузить в Railway по пути $STORAGE_DIR/tiktok/")
         sys.exit(1)
 
     account_name = sys.argv[1]
@@ -57,19 +54,33 @@ def main() -> None:
             stealth.apply_stealth_sync(context)
             page = context.new_page()
 
-            print("Открываю страницу загрузки TikTok...")
-            print("Пожалуйста, войдите в аккаунт в открывшемся окне.")
-            page.goto(UPLOAD_URL, wait_until="domcontentloaded")
-            page.wait_for_timeout(3000)
+            print("Открываю страницу входа TikTok...")
+            page.goto(LOGIN_URL, timeout=120000)
+            time.sleep(2)
 
-            input("После успешного входа нажмите Enter, чтобы сохранить куки...")
+            print()
+            print("=" * 60)
+            print("ВОЙДИТЕ В АККАУНТ TIKTOK В ОТКРЫВШЕМСЯ ОКНЕ БРАУЗЕРА")
+            print("После входа вы должны оказаться в ленте TikTok.")
+            print("Затем закройте вкладку и нажмите Enter в терминале.")
+            print("=" * 60)
+            print()
 
-            page.wait_for_timeout(2000)
+            input("Нажмите Enter ПОСЛЕ того, как вошли в TikTok...")
+
+            time.sleep(1)
+            page.goto(UPLOAD_URL, timeout=60000)
+            time.sleep(2)
+
             cookies = context.cookies()
-            with open(f"TK_cookies_{account_name}.json", "w") as f:
-                json.dump(cookies, f, indent=4)
-            print(f"✅ Куки сохранены для аккаунта {account_name}")
-            print(f"   Файл: {tiktok_data / f'TK_cookies_{account_name}.json'}")
+            if not cookies:
+                print("⚠️ Куки пустые — возможно, вход не удался.")
+            else:
+                filename = f"TK_cookies_{account_name}.json"
+                with open(filename, "w") as f:
+                    json.dump(cookies, f, indent=4)
+                print(f"✅ Куки сохранены ({len(cookies)} штук)")
+                print(f"   Файл: {tiktok_data / filename}")
 
             context.close()
             browser.close()
