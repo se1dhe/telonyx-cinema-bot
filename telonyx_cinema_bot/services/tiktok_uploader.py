@@ -13,44 +13,51 @@ def init_tiktok_session(account_name: str, storage_dir: Path) -> bool:
     import json
     import pickle
 
-    cookies_dir = storage_dir / "tiktok" / "CookiesDir"
-    cookies_dir.mkdir(parents=True, exist_ok=True)
-    cookie_file = cookies_dir / f"tiktok_session-{account_name}.cookie"
+    try:
+        cookies_dir = storage_dir / "tiktok" / "CookiesDir"
+        cookies_dir.mkdir(parents=True, exist_ok=True)
+        cookie_file = cookies_dir / f"tiktok_session-{account_name}.cookie"
 
-    if cookie_file.exists():
-        return True
-
-    # 1. Try new format from env
-    env_cookies = os.environ.get("TIKTOK_SESSION_COOKIE_BASE64")
-    if env_cookies:
-        try:
-            data = base64.b64decode(env_cookies)
-            cookie_file.write_bytes(data)
-            logger.info("Loaded TikTok session cookie for %s from env", account_name)
+        if cookie_file.exists():
             return True
-        except Exception:
-            logger.exception("Failed to decode TIKTOK_SESSION_COOKIE_BASE64")
 
-    # 2. Try converting old haziq-exe JSON cookies
-    bundled_dir = Path(__file__).resolve().parent.parent / "tiktok_cookies"
-    old_json = bundled_dir / f"TK_cookies_{account_name}.json"
-    if old_json.exists():
-        try:
-            cookies = json.loads(old_json.read_text(encoding="utf-8"))
-            cookie_file.write_bytes(pickle.dumps(cookies))
-            logger.info("Converted old JSON cookies to new pickle format for %s", account_name)
-            return True
-        except Exception:
-            logger.exception("Failed to convert old cookies for %s", account_name)
+        # 1. Try new format from env
+        env_cookies = os.environ.get("TIKTOK_SESSION_COOKIE_BASE64")
+        if env_cookies:
+            try:
+                data = base64.b64decode(env_cookies)
+                cookie_file.write_bytes(data)
+                logger.info("Loaded TikTok session cookie for %s from env", account_name)
+                return True
+            except Exception:
+                logger.exception("Failed to decode TIKTOK_SESSION_COOKIE_BASE64")
 
-    logger.warning(
-        "No TikTok session cookie for %s. "
-        "Log in locally: 'python cli.py login -n %s' "
-        "then base64-encode CookiesDir/tiktok_session-%s.cookie "
-        "and set TIKTOK_SESSION_COOKIE_BASE64 env var.",
-        account_name, account_name, account_name,
-    )
-    return False
+        # 2. Try converting old haziq-exe JSON cookies
+        bundled_dir = Path(__file__).resolve().parent.parent / "tiktok_cookies"
+        old_json = bundled_dir / f"TK_cookies_{account_name}.json"
+        if old_json.exists():
+            try:
+                cookies = json.loads(old_json.read_text(encoding="utf-8"))
+                cookie_file.write_bytes(pickle.dumps(cookies))
+                logger.info("Converted old JSON cookies to new pickle format for %s", account_name)
+                return True
+            except Exception:
+                logger.exception("Failed to convert old cookies for %s", account_name)
+
+        logger.warning(
+            "No TikTok session cookie for %s. "
+            "Log in locally: 'python cli.py login -n %s' "
+            "then base64-encode CookiesDir/tiktok_session-%s.cookie "
+            "and set TIKTOK_SESSION_COOKIE_BASE64 env var.",
+            account_name, account_name, account_name,
+        )
+        return False
+    except SystemExit:
+        logger.error("TikTok session init triggered sys.exit for %s", account_name)
+        return False
+    except Exception:
+        logger.exception("TikTok session init failed for %s", account_name)
+        return False
 
 
 async def upload_to_tiktok(
@@ -114,6 +121,15 @@ def _sync_upload(
         else:
             logger.warning("TikTok upload returned falsy for %s", account_name)
             return False
+    except SystemExit as exc:
+        # The tiktok-autouploader library calls sys.exit(1) on auth failure.
+        # We must NOT let it kill the entire bot process.
+        logger.error(
+            "TikTok upload triggered sys.exit(%s) for %s — treating as failure",
+            exc.code if hasattr(exc, "code") else "?",
+            account_name,
+        )
+        return False
     except Exception:
         logger.exception("TikTok upload failed for %s", account_name)
         return False
