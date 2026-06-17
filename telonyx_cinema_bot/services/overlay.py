@@ -25,12 +25,17 @@ def _ass_escape_path(path: Path) -> str:
 def _style_block() -> str:
     return """[V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Watermark,DejaVu Sans,28,&H44F6F2EA,&H000000FF,&H00000000,&H64000000,0,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1
+Style: Watermark,DejaVu Sans,40,&H00FFFFFF,&H000000FF,&H00CC8800,&H40000000,1,0,0,0,100,100,2,0,1,2.5,1.5,2,0,0,60,1
 """
 
 
+WATERMARK_DELAY = 1.0
+FADE_IN = 500
+FADE_OUT = 300
+
+
 def generate_watermark_ass(duration: float) -> str:
-    t0 = ass_time(0)
+    t0 = ass_time(WATERMARK_DELAY)
     tend = ass_time(duration)
 
     lines = [
@@ -43,7 +48,7 @@ def generate_watermark_ass(duration: float) -> str:
         _style_block(),
         "[Events]",
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
-        f"Dialogue: 0,{t0},{tend},Watermark,,0,0,0,,{{\\an3\\fad(300,300)}}@telonyx_cinema",
+        f"Dialogue: 0,{t0},{tend},Watermark,,0,0,0,,{{\\an2\\fad({FADE_IN},{FADE_OUT})}}@telonyx_cinema",
     ]
 
     return "\n".join(lines)
