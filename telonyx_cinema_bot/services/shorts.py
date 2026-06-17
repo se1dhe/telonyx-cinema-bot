@@ -181,14 +181,15 @@ async def process_shorts_item(
             else:
                 logger.warning("TikTok upload failed, continuing to Telegram")
 
-        with open(output_path, "rb") as f:
-            msg = await bot.send_video(
-                settings.telegram_channel_id,
-                video=f,
-                caption=description,
-                parse_mode="HTML",
-                supports_streaming=True,
-            )
+        from aiogram.types import FSInputFile
+
+        msg = await bot.send_video(
+            settings.telegram_channel_id,
+            video=FSInputFile(str(output_path)),
+            caption=description,
+            parse_mode="HTML",
+            supports_streaming=True,
+        )
 
         item.telegram_file_id = msg.video.file_id
         item.video_path = str(output_path)
