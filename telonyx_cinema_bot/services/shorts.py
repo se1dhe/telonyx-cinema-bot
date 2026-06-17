@@ -135,7 +135,7 @@ async def process_shorts_item(
             if movie:
                 item.movie_title = movie.title
                 item.movie_year = str(movie.release_year or "")
-                item.movie_genre = ", ".join(movie.genres[:3]) if movie.genres else ""
+                item.movie_genre = movie.genres[0] if movie.genres else ""
                 item.tmdb_id = movie.tmdb_id
             else:
                 item.movie_title = parsed

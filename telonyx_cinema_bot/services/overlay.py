@@ -30,26 +30,6 @@ Style: Axis,DejaVu Sans,16,&H66EED322,&H000000FF,&H00000000,&H00000000,0,0,0,0,1
 """
 
 
-def _intro_line(title: str, year: str, genre_line: str, t0: str, t1: str, axis_y: int, title_y: int, exit_ms: int) -> list[str]:
-    lines = []
-    lines.append(
-        f"Dialogue: 1,{t0},{t1},Axis,,0,0,0,,"
-        f"{{\\move(-120,{axis_y},74,{axis_y},0,760)"
-        f"\\t({exit_ms},{int(ass_time_to_ms(t1))},\\move(74,{axis_y},-120,{axis_y}))"
-        f"\\fad(120,160)}}{{\\p1}}m 0 0 l 4 0 l 4 116 l 0 116{{\\p0}}"
-    )
-    lines.append(
-        f"Dialogue: 3,{t0},{t1},TitleBlock,,0,0,0,,"
-        f"{{\\an7\\move(-920,{title_y},96,{title_y},0,760)"
-        f"\\t({exit_ms},{int(ass_time_to_ms(t1))},\\move(96,{title_y},-920,{title_y}))"
-        f"\\blur0.08\\fad(120,160)}}"
-        f"{{\\fs18\\fsp2.4\\c&H9CFFFFFF&\\bord0.35}}TELONYX.APP"
-        f"\\N{{\\fs58\\fsp0.25\\c&H00F6F2EA&\\bord1.65}}{title}"
-        f"\\N{{\\fs30\\fsp3.4\\c&H00EED322&\\bord0.85}}{year}{genre_line}"
-    )
-    return lines
-
-
 def ass_time_to_ms(t: str) -> float:
     parts = t.split(":")
     h, m, s_cs = int(parts[0]), int(parts[1]), parts[2]
@@ -60,27 +40,21 @@ def ass_time_to_ms(t: str) -> float:
 def generate_title_ass(movie_title: str, movie_year: str, movie_genre: str, duration: float) -> str:
     title = str(movie_title).strip().upper() or "MOVIE"
     year = str(movie_year).strip() or "YEAR"
-    genre = str(movie_genre).strip()
+    genre = str(movie_genre).strip().split(",")[0].strip() if movie_genre else ""
 
-    intro_end = min(duration, 5.0)
-    intro_exit = min(duration, 4.2)
-    outro_start = max(0.0, duration - 5.0)
+    hold_end = max(3.0, duration * 0.8)
+    slide_in_dur = 0.76
+    exit_start = max(hold_end - 0.85, 4.0)
     axis_y = 1507
     title_y = 1504
 
     genre_line = f"\\N{{\\fs26\\fsp2.8\\c&H00EED322&\\bord0.75}}{genre}" if genre else ""
 
     t0 = ass_time(0)
-    t_intro = ass_time(intro_end)
-    t_outro = ass_time(outro_start)
-    t_end = ass_time(duration)
+    t_hold = ass_time(hold_end)
 
-    intro_exit_ms = int(intro_exit * 1000)
-
-    # outro animation timing
-    out_dur = duration - outro_start
-    out_fade_start_ms = int(max(0, (out_dur - 0.85) * 1000))
-    out_total_ms = int(out_dur * 1000)
+    exit_ms = int(exit_start * 1000)
+    hold_end_ms = int(hold_end * 1000)
 
     lines = [
         "[Script Info]",
@@ -94,19 +68,20 @@ def generate_title_ass(movie_title: str, movie_year: str, movie_genre: str, dura
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
     ]
 
-    lines.extend(_intro_line(title, year, genre_line, t0, t_intro, axis_y, title_y, intro_exit_ms))
-
+    # axis line
     lines.append(
-        f"Dialogue: 1,{t_outro},{t_end},Axis,,0,0,0,,"
-        f"{{\\move(-120,{axis_y},74,{axis_y},0,680)"
-        f"\\t({out_fade_start_ms},{out_total_ms},\\move(74,{axis_y},-120,{axis_y}))"
-        f"\\fad(120,190)}}{{\\p1}}m 0 0 l 4 0 l 4 116 l 0 116{{\\p0}}"
+        f"Dialogue: 1,{t0},{t_hold},Axis,,0,0,0,,"
+        f"{{\\move(-120,{axis_y},74,{axis_y},0,{int(slide_in_dur*1000)})"
+        f"\\t({exit_ms},{hold_end_ms},\\move(74,{axis_y},-120,{axis_y}))"
+        f"\\fad(120,160)}}{{\\p1}}m 0 0 l 4 0 l 4 116 l 0 116{{\\p0}}"
     )
+
+    # title block
     lines.append(
-        f"Dialogue: 3,{t_outro},{t_end},TitleBlock,,0,0,0,,"
-        f"{{\\an7\\move(-920,{title_y},96,{title_y},0,680)"
-        f"\\t({out_fade_start_ms},{out_total_ms},\\move(96,{title_y},-920,{title_y}))"
-        f"\\blur0.08\\fad(120,190)}}"
+        f"Dialogue: 3,{t0},{t_hold},TitleBlock,,0,0,0,,"
+        f"{{\\an7\\move(-920,{title_y},96,{title_y},0,{int(slide_in_dur*1000)})"
+        f"\\t({exit_ms},{hold_end_ms},\\move(96,{title_y},-920,{title_y}))"
+        f"\\blur0.08\\fad(120,{int((duration-hold_end+2)*1000)})}}"
         f"{{\\fs18\\fsp2.4\\c&H9CFFFFFF&\\bord0.35}}TELONYX.APP"
         f"\\N{{\\fs58\\fsp0.25\\c&H00F6F2EA&\\bord1.65}}{title}"
         f"\\N{{\\fs30\\fsp3.4\\c&H00EED322&\\bord0.85}}{year}{genre_line}"
