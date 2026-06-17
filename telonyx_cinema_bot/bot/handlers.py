@@ -534,17 +534,17 @@ def build_router(
             await callback.answer("Только для администраторов.", show_alert=True)
             return
 
-        from sqlalchemy import update
+        from sqlalchemy import delete
 
         async with session_factory() as session:
             async with session.begin():
-                await session.execute(
-                    update(ShortsQueue)
+                result = await session.execute(
+                    delete(ShortsQueue)
                     .where(ShortsQueue.status.in_([ShortsQueueStatus.pending, ShortsQueueStatus.failed]))
-                    .values(status=ShortsQueueStatus.failed, error_message="Очищено администратором")
                 )
+                deleted_count = result.rowcount
 
-        await callback.answer("Очередь очищена.", show_alert=True)
+        await callback.answer(f"Удалено {deleted_count} записей.", show_alert=True)
         if callback.message:
             await _replace_callback_message(
                 callback.message,
