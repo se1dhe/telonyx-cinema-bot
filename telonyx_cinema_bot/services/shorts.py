@@ -223,7 +223,7 @@ async def process_shorts_item(
                 disable_web_page_preview=True,
             )
 
-        if item.movie_title:
+        if item.movie_title and item.tmdb_id:
             await _enqueue_movie_fact(item, session, settings, copywriter)
 
     except Exception as exc:
