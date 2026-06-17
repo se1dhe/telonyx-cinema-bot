@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from telonyx_cinema_bot.config import Settings
 from telonyx_cinema_bot.models import ShortsQueue, ShortsQueueStatus
 from telonyx_cinema_bot.services.editorial import EditorialService
+from telonyx_cinema_bot.services.shorts import process_shorts_item
 
 
 class ManualPostStates(StatesGroup):
@@ -36,6 +37,7 @@ def _main_menu() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="🚀 Опубликовать сейчас", callback_data="editorial:publish_now")],
             [InlineKeyboardButton(text="📰 Ручной пост", callback_data="manual:start")],
             [InlineKeyboardButton(text="🎬 Shorts", callback_data="shorts:add")],
+            [InlineKeyboardButton(text="📹 Shorts очередь", callback_data="shorts:queue")],
         ]
     )
 
@@ -360,7 +362,10 @@ def build_router(
                 parse_mode=ParseMode.HTML,
                 reply_markup=InlineKeyboardMarkup(
                     inline_keyboard=[
-                        [InlineKeyboardButton(text="➕ Добавить еще", callback_data="shorts:add")],
+                        [
+                            InlineKeyboardButton(text="🚀 Опубликовать сейчас", callback_data=f"shorts:publish_now:{item_id}"),
+                            InlineKeyboardButton(text="➕ Добавить еще", callback_data="shorts:add"),
+                        ],
                     ]
                 ),
             )
@@ -418,6 +423,124 @@ def build_router(
                 f"🔄 Shorts #{item_id} поставлен в очередь на повторную обработку.",
             )
         await callback.answer()
+
+    @router.callback_query(F.data == "shorts:queue")
+    async def cb_shorts_queue(callback: CallbackQuery) -> None:
+        if not _is_admin_cb(callback):
+            await callback.answer("Только для администраторов.", show_alert=True)
+            return
+
+        from sqlalchemy import select
+
+        async with session_factory() as session:
+            result = await session.execute(
+                select(ShortsQueue)
+                .where(ShortsQueue.status.in_([ShortsQueueStatus.pending, ShortsQueueStatus.failed]))
+                .order_by(ShortsQueue.id.desc())
+                .limit(20)
+            )
+            items = list(result.scalars())
+
+        if not items:
+            text = "📹 Shorts очередь пуста."
+        else:
+            lines = ["📹 <b>Shorts очередь</b>\n"]
+            for item in items:
+                slot = ""
+                if item.scheduled_for:
+                    slot = f" · ⏰ {item.scheduled_for:%d.%m %H:%M}"
+                lines.append(
+                    f"#{item.id} · {item.status.value}{slot}\n"
+                    f"{item.url[:80]}"
+                )
+                if item.movie_title:
+                    lines.append(f"🎬 {item.movie_title}")
+                if item.error_message:
+                    lines.append(f"⚠️ {item.error_message[:80]}")
+            text = "\n\n".join(lines)
+
+        kb = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="🔄 Обновить", callback_data="shorts:queue")],
+                [InlineKeyboardButton(text="🗑 Очистить очередь", callback_data="shorts:clear")],
+                [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:back")],
+            ]
+        )
+        if callback.message:
+            await _replace_callback_message(callback.message, text, reply_markup=kb, parse_mode=ParseMode.HTML)
+        await callback.answer()
+
+    @router.callback_query(F.data.startswith("shorts:publish_now:"))
+    async def cb_shorts_publish_now(callback: CallbackQuery, bot: Bot) -> None:
+        if not _is_admin_cb(callback):
+            await callback.answer("Только для администраторов.", show_alert=True)
+            return
+
+        item_id = int(callback.data.split(":")[2])
+        admin_id = callback.from_user.id
+
+        await callback.answer("Запускаю публикацию...")
+
+        if callback.message:
+            await _replace_callback_message(
+                callback.message,
+                f"⏳ Обработка Shorts #{item_id}...",
+            )
+
+        try:
+            async with session_factory() as session:
+                async with session.begin():
+                    item = await session.get(ShortsQueue, item_id)
+                    if item is None or item.status not in (ShortsQueueStatus.pending, ShortsQueueStatus.failed):
+                        await bot.send_message(admin_id, "❌ Запись не найдена или уже обрабатывается.")
+                        return
+                    item.status = ShortsQueueStatus.downloading
+
+            async with session_factory() as session:
+                await process_shorts_item(item_id, session, bot, settings, copywriter)
+
+            async with session_factory() as session:
+                item = await session.get(ShortsQueue, item_id)
+                msg_parts = [f"✅ Shorts #{item_id} обработан."]
+                if item and item.status == ShortsQueueStatus.published:
+                    msg_parts.append("📢 Telegram: опубликовано")
+                    if settings.tiktok_account_name:
+                        msg_parts.append("🎵 TikTok: загружено (проверьте в приложении)")
+                elif item and item.status == ShortsQueueStatus.failed:
+                    msg_parts.append(f"❌ Ошибка: {item.error_message or 'неизвестно'}")
+                else:
+                    msg_parts.append(f"⚠️ Статус: {item.status.value if item else '???'}")
+
+                await bot.send_message(admin_id, "\n".join(msg_parts))
+
+        except Exception as exc:
+            import logging as _logging
+            _logging.getLogger(__name__).exception("Manual publish failed for shorts %s", item_id)
+            await bot.send_message(admin_id, "❌ Ошибка при публикации Shorts #{}:\n{}".format(item_id, str(exc)[:300]))
+
+    @router.callback_query(F.data == "shorts:clear")
+    async def cb_shorts_clear(callback: CallbackQuery) -> None:
+        if not _is_admin_cb(callback):
+            await callback.answer("Только для администраторов.", show_alert=True)
+            return
+
+        from sqlalchemy import update
+
+        async with session_factory() as session:
+            async with session.begin():
+                await session.execute(
+                    update(ShortsQueue)
+                    .where(ShortsQueue.status.in_([ShortsQueueStatus.pending, ShortsQueueStatus.failed]))
+                    .values(status=ShortsQueueStatus.failed, error_message="Очищено администратором")
+                )
+
+        await callback.answer("Очередь очищена.", show_alert=True)
+        if callback.message:
+            await _replace_callback_message(
+                callback.message,
+                "🗑 Очередь shorts очищена.",
+                reply_markup=_main_menu(),
+            )
 
     return router
 
