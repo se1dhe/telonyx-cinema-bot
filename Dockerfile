@@ -8,7 +8,7 @@ RUN apt-get update && \
       libcups2 libdrm2 libdbus-1-3 libxkbcommon0 \
       libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
       libgbm1 libpango-1.0-0 libcairo2 libasound2 \
-      libgtk-3-0 libgdk-pixbuf-2.0-0 libxshmfence1 gnupg2 ffmpeg \
+      libgtk-3-0 libgdk-pixbuf-2.0-0 libxshmfence1 gnupg2 ffmpeg tzdata \
     && curl -fsSL https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg \
     && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list \
     && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
