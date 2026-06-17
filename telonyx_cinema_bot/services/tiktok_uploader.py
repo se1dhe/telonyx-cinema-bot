@@ -9,9 +9,27 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
+def _json_cookies_to_netscape(cookies: list[dict]) -> str:
+    """Конвертирует JSON-куки (Playwright-формат) в Netscape cookies.txt."""
+    lines = ["# Netscape HTTP Cookie File", "# This is a generated file! Do not edit.", ""]
+    for c in cookies:
+        domain = c.get("domain", "")
+        flag = "TRUE" if domain.startswith(".") else "FALSE"
+        path = c.get("path", "/")
+        secure = "TRUE" if c.get("secure", False) else "FALSE"
+        expires = c.get("expires", c.get("expirationDate", 0))
+        try:
+            exp_val = int(float(expires)) if expires else 0
+        except (ValueError, TypeError):
+            exp_val = 0
+        name = c.get("name", "")
+        value = c.get("value", "")
+        lines.append("\t".join([domain, flag, path, secure, str(exp_val), name, value]))
+    return "\n".join(lines)
+
+
 def init_tiktok_session(account_name: str, storage_dir: Path) -> bool:
     import json
-    import pickle
 
     try:
         cookies_dir = storage_dir / "tiktok" / "CookiesDir"
@@ -38,14 +56,15 @@ def init_tiktok_session(account_name: str, storage_dir: Path) -> bool:
             except Exception:
                 logger.exception("Failed to decode TIKTOK_SESSION_COOKIE_BASE64")
 
-        # 2. Try converting old haziq-exe JSON cookies
+        # 2. Try converting old Playwright/JSON cookies to Netscape format
         bundled_dir = Path(__file__).resolve().parent.parent / "tiktok_cookies"
         old_json = bundled_dir / f"TK_cookies_{account_name}.json"
         if old_json.exists():
             try:
                 cookies = json.loads(old_json.read_text(encoding="utf-8"))
-                cookie_file.write_bytes(pickle.dumps(cookies))
-                logger.info("Converted old JSON cookies to new pickle format for %s", account_name)
+                netscape = _json_cookies_to_netscape(cookies)
+                cookie_file.write_bytes(netscape.encode("utf-8"))
+                logger.info("Converted old JSON cookies to Netscape format for %s", account_name)
                 return True
             except Exception:
                 logger.exception("Failed to convert old cookies for %s", account_name)
