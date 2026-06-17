@@ -18,11 +18,17 @@ def init_tiktok_session(account_name: str, storage_dir: Path) -> bool:
         cookies_dir.mkdir(parents=True, exist_ok=True)
         cookie_file = cookies_dir / f"tiktok_session-{account_name}.cookie"
 
-        if cookie_file.exists():
-            return True
-
-        # 1. Try new format from env
         env_cookies = os.environ.get("TIKTOK_SESSION_COOKIE_BASE64")
+        bundled_dir = Path(__file__).resolve().parent.parent / "tiktok_cookies"
+        old_json = bundled_dir / f"TK_cookies_{account_name}.json"
+
+        # Если есть свежий источник (env или bundled JSON) — сбрасываем старый файл,
+        # чтобы избежать проблемы с устаревшими/битыми куками на persistent storage.
+        if env_cookies or old_json.exists():
+            if cookie_file.exists():
+                cookie_file.unlink()
+                logger.info("Removed stale cookie file for %s", account_name)
+
         if env_cookies:
             try:
                 data = base64.b64decode(env_cookies)
