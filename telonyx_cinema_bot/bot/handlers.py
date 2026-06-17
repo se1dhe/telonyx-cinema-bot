@@ -358,6 +358,11 @@ def build_router(
                 f"URL: {url}\n"
                 "Статус: <b>ожидает обработки</b>",
                 parse_mode=ParseMode.HTML,
+                reply_markup=InlineKeyboardMarkup(
+                    inline_keyboard=[
+                        [InlineKeyboardButton(text="➕ Добавить еще", callback_data="shorts:add")],
+                    ]
+                ),
             )
             async with session.begin():
                 item = await session.get(ShortsQueue, item_id)

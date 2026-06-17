@@ -22,7 +22,7 @@ def _ensure_cookie_file(account_name: str, tiktok_data: Path) -> None:
         logger.info("Copied bundled cookies to %s", target)
 
 
-async def upload_to_tiktok(video_path: Path, description: str, account_name: str, storage_dir: Path) -> bool:
+async def upload_to_tiktok(video_path: Path, description: str, account_name: str, storage_dir: Path, hashtags: list[str] | None = None) -> bool:
     loop = asyncio.get_running_loop()
 
     def _sync_upload() -> bool:
@@ -45,6 +45,8 @@ async def upload_to_tiktok(video_path: Path, description: str, account_name: str
                 suppressprint=False,
                 copyrightcheck=True,
             )
+            if hashtags:
+                kwargs["hashtags"] = hashtags
             tk_upload(**kwargs)
             return True
         except TikTokUploadError:

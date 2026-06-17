@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -13,6 +14,8 @@ from telonyx_cinema_bot.services.gemini import GeminiCopywriter
 from telonyx_cinema_bot.services.overlay import render_with_overlay
 from telonyx_cinema_bot.services.tiktok_uploader import upload_to_tiktok
 from telonyx_cinema_bot.services.tmdb import TMDbClient
+
+TAG_RE = re.compile(r"#\w+")
 
 logger = logging.getLogger(__name__)
 
@@ -170,6 +173,10 @@ async def process_shorts_item(
             movie_genre=item.movie_genre or "",
         )
 
+        hashtags = TAG_RE.findall(description)
+        tiktok_desc = TAG_RE.sub("", description).strip()
+        tiktok_desc = re.sub(r"\n{3,}", "\n\n", tiktok_desc).strip()
+
         item.status = ShortsQueueStatus.ready
         await session.flush()
 
@@ -178,7 +185,8 @@ async def process_shorts_item(
             storage_dir = Path(settings.storage_dir)
             tiktok_ok = await upload_to_tiktok(
                 video_path=output_path,
-                description=description,
+                description=tiktok_desc,
+                hashtags=hashtags,
                 account_name=settings.tiktok_account_name,
                 storage_dir=storage_dir,
             )
