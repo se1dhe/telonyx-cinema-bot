@@ -36,6 +36,7 @@ async def create_schema(engine: AsyncEngine) -> None:
         "CREATE TABLE IF NOT EXISTS news_urls (id SERIAL PRIMARY KEY, url VARCHAR(512) UNIQUE NOT NULL, created_at TIMESTAMPTZ DEFAULT NOW())",
         "CREATE TABLE IF NOT EXISTS editorial_control (id INTEGER PRIMARY KEY, autopublish_enabled BOOLEAN DEFAULT TRUE NOT NULL, paused_until TIMESTAMPTZ, last_news_published_at TIMESTAMPTZ, last_fallback_published_at TIMESTAMPTZ, updated_at TIMESTAMPTZ DEFAULT NOW())",
         "CREATE TABLE IF NOT EXISTS shorts_queue (id SERIAL PRIMARY KEY, url VARCHAR(1024) NOT NULL, status VARCHAR(50) DEFAULT 'pending', movie_title VARCHAR(512), movie_year VARCHAR(16), movie_genre VARCHAR(255), tmdb_id INTEGER, error_message TEXT, video_path VARCHAR(1024), telegram_file_id VARCHAR(255), admin_msg_id BIGINT, published_at TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW())",
+        "ALTER TABLE shorts_queue ADD COLUMN IF NOT EXISTS yt_raw_title VARCHAR(1024)",
     ]
 
     async with engine.begin() as conn:
