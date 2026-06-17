@@ -47,6 +47,15 @@ def configure_scheduler(
         replace_existing=True,
         next_run_time=now + timedelta(minutes=2),
     )
+    scheduler.add_job(
+        _run_shorts_queue,
+        "interval",
+        minutes=1,
+        args=[settings, session_factory, publisher],
+        id="shorts_queue",
+        replace_existing=True,
+        next_run_time=now + timedelta(seconds=15),
+    )
     return scheduler
 
 
@@ -105,6 +114,50 @@ async def _run_review_collector(settings: Settings, session_factory) -> None:
             logger.info("Queued review post for %s", movie.display_title)
         else:
             logger.info("Review post skipped (duplicate?)")
+
+
+async def _run_shorts_queue(
+    settings: Settings,
+    session_factory,
+    publisher: AiogramPublisher,
+) -> None:
+    from sqlalchemy import select
+
+    from telonyx_cinema_bot.models import ShortsQueue, ShortsQueueStatus
+    from telonyx_cinema_bot.services.shorts import process_shorts_item
+
+    async with session_factory() as session:
+        async with session.begin():
+            last_published = await session.scalar(
+                select(ShortsQueue.published_at)
+                .where(ShortsQueue.status == ShortsQueueStatus.published)
+                .order_by(ShortsQueue.published_at.desc())
+                .limit(1)
+            )
+            if last_published is not None:
+                elapsed = datetime.now(settings.zoneinfo) - last_published
+                if elapsed < timedelta(minutes=settings.shorts_interval_minutes):
+                    return
+
+            result = await session.execute(
+                select(ShortsQueue)
+                .where(ShortsQueue.status == ShortsQueueStatus.pending)
+                .order_by(ShortsQueue.created_at)
+                .limit(1)
+            )
+            item = result.scalar_one_or_none()
+            if item is None:
+                return
+
+            item.status = ShortsQueueStatus.downloading
+
+    logger.info("Processing shorts queue item #%s: %s", item.id, item.url)
+    try:
+        copywriter = await _build_copywriter(settings)
+        async with session_factory() as session:
+            await process_shorts_item(item.id, session, publisher.bot, settings, copywriter)
+    except Exception:
+        logger.exception("Shorts queue processing failed for item #%s", item.id)
 
 
 async def _run_editorial_collector(settings: Settings, session_factory) -> None:

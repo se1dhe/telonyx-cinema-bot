@@ -12,12 +12,17 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from telonyx_cinema_bot.config import Settings
+from telonyx_cinema_bot.models import ShortsQueue, ShortsQueueStatus
 from telonyx_cinema_bot.services.editorial import EditorialService
 
 
 class ManualPostStates(StatesGroup):
     waiting_for_post = State()
     waiting_for_confirmation = State()
+
+
+class AddShortsStates(StatesGroup):
+    waiting_for_url = State()
 
 
 def _main_menu() -> InlineKeyboardMarkup:
@@ -30,6 +35,7 @@ def _main_menu() -> InlineKeyboardMarkup:
             ],
             [InlineKeyboardButton(text="🚀 Опубликовать сейчас", callback_data="editorial:publish_now")],
             [InlineKeyboardButton(text="📰 Ручной пост", callback_data="manual:start")],
+            [InlineKeyboardButton(text="🎬 Shorts", callback_data="shorts:add")],
         ]
     )
 
@@ -287,6 +293,77 @@ def build_router(
 
         if callback.message:
             await callback.message.answer(text_res, reply_markup=_main_menu())
+        await callback.answer()
+
+    @router.callback_query(F.data == "shorts:add")
+    async def cb_shorts_add(callback: CallbackQuery, state: FSMContext) -> None:
+        if not _is_admin_cb(callback):
+            await callback.answer("Только для администраторов.", show_alert=True)
+            return
+
+        await state.set_state(AddShortsStates.waiting_for_url)
+        if callback.message:
+            await _replace_callback_message(
+                callback.message,
+                "🎬 <b>Добавить Shorts</b>\n"
+                "Пришлите ссылку на YouTube Shorts.\n\n"
+                "Бот скачает видео, наложит плашку с названием фильма, "
+                "опубликует в TikTok и Telegram по расписанию.",
+                parse_mode=ParseMode.HTML,
+                reply_markup=_cancel_menu(),
+            )
+        await callback.answer()
+
+    @router.message(StateFilter(AddShortsStates.waiting_for_url))
+    async def fsm_receive_shorts_url(message: Message, state: FSMContext) -> None:
+        if not _is_admin_msg(message):
+            return
+
+        url = (message.text or "").strip()
+        if not url.startswith("http"):
+            await message.answer("⚠️ Нужна ссылка (начинается с http).", reply_markup=_cancel_menu())
+            return
+
+        async with session_factory() as session:
+            async with session.begin():
+                item = ShortsQueue(url=url, status=ShortsQueueStatus.pending)
+                session.add(item)
+                await session.flush()
+                item_id = item.id
+
+            msg = await message.answer(
+                f"📥 Shorts #{item_id} добавлен в очередь.\n"
+                f"URL: {url}\n"
+                "Статус: <b>ожидает обработки</b>",
+                parse_mode=ParseMode.HTML,
+            )
+            async with session.begin():
+                item = await session.get(ShortsQueue, item_id)
+                item.admin_msg_id = msg.message_id
+
+        await state.clear()
+
+    @router.callback_query(F.data.startswith("shorts:retry:"))
+    async def cb_shorts_retry(callback: CallbackQuery) -> None:
+        if not _is_admin_cb(callback):
+            await callback.answer("Только для администраторов.", show_alert=True)
+            return
+
+        item_id = int(callback.data.split(":")[2])
+        async with session_factory() as session:
+            async with session.begin():
+                item = await session.get(ShortsQueue, item_id)
+                if item is None:
+                    await callback.answer("Запись не найдена.", show_alert=True)
+                    return
+                item.status = ShortsQueueStatus.pending
+                item.error_message = None
+
+        if callback.message:
+            await _replace_callback_message(
+                callback.message,
+                f"🔄 Shorts #{item_id} поставлен в очередь на повторную обработку.",
+            )
         await callback.answer()
 
     return router

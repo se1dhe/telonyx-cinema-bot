@@ -24,6 +24,14 @@ class Settings(BaseSettings):
     channel_link: str | None = Field(default=None, alias="CHANNEL_LINK")
     fallback_min_interval_hours: int = Field(default=2, alias="FALLBACK_MIN_INTERVAL_HOURS")
     editorial_tone: str = Field(default="cinema_magazine", alias="EDITORIAL_TONE")
+    yt_dlp_bin: str = Field(default="yt-dlp", alias="YT_DLP_BIN")
+    ffmpeg_bin: str = Field(default="ffmpeg", alias="FFMPEG_BIN")
+    ffprobe_bin: str = Field(default="ffprobe", alias="FFPROBE_BIN")
+    storage_dir: str = Field(default="/data/storage", alias="STORAGE_DIR")
+    shorts_interval_minutes: int = Field(default=60, alias="SHORTS_INTERVAL_MINUTES")
+    tiktok_client_key: str | None = Field(default=None, alias="TIKTOK_CLIENT_KEY")
+    tiktok_client_secret: str | None = Field(default=None, alias="TIKTOK_CLIENT_SECRET")
+    tiktok_access_token: str | None = Field(default=None, alias="TIKTOK_ACCESS_TOKEN")
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore", populate_by_name=True)
 

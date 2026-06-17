@@ -213,6 +213,42 @@ class EditorialControl(Base):
     )
 
 
+class ShortsQueueStatus(str, enum.Enum):
+    pending = "pending"
+    downloading = "downloading"
+    rendering = "rendering"
+    ready = "ready"
+    publishing_tiktok = "publishing_tiktok"
+    published = "published"
+    failed = "failed"
+
+
+class ShortsQueue(Base):
+    __tablename__ = "shorts_queue"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    url: Mapped[str] = mapped_column(String(1024))
+    status: Mapped[ShortsQueueStatus] = mapped_column(
+        Enum(ShortsQueueStatus, native_enum=False),
+        default=ShortsQueueStatus.pending,
+        index=True,
+    )
+    movie_title: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    movie_year: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    movie_genre: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    tmdb_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    video_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    telegram_file_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    tiktok_publish_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    admin_msg_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 class SchemaMigration(Base):
     __tablename__ = "schema_migrations"
 
