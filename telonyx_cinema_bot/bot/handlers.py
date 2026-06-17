@@ -443,29 +443,39 @@ def build_router(
 
         if not items:
             text = "📹 Shorts очередь пуста."
+            kb = InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [InlineKeyboardButton(text="🔄 Обновить", callback_data="shorts:queue")],
+                    [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:back")],
+                ]
+            )
         else:
-            lines = ["📹 <b>Shorts очередь</b>\n"]
+            text_lines = ["📹 <b>Shorts очередь</b>\n\n"]
+            item_buttons = []
             for item in items:
                 slot = ""
                 if item.scheduled_for:
                     slot = f" · ⏰ {item.scheduled_for:%d.%m %H:%M}"
-                lines.append(
-                    f"#{item.id} · {item.status.value}{slot}\n"
-                    f"{item.url[:80]}"
+                status_icon = "⏳" if item.status == ShortsQueueStatus.pending else "❌"
+                line = (
+                    f"{status_icon} #{item.id} · {item.status.value}{slot}\n"
+                    f"🔗 {item.url[:60]}\n"
                 )
                 if item.movie_title:
-                    lines.append(f"🎬 {item.movie_title}")
-                if item.error_message:
-                    lines.append(f"⚠️ {item.error_message[:80]}")
-            text = "\n\n".join(lines)
+                    line += f"🎬 {item.movie_title}\n"
+                text_lines.append(line)
+                item_buttons.append(
+                    [InlineKeyboardButton(text=f"🚀 Опублик. #{item.id}", callback_data=f"shorts:publish_now:{item.id}")]
+                )
+            text = "\n".join(text_lines)
 
-        kb = InlineKeyboardMarkup(
-            inline_keyboard=[
-                [InlineKeyboardButton(text="🔄 Обновить", callback_data="shorts:queue")],
-                [InlineKeyboardButton(text="🗑 Очистить очередь", callback_data="shorts:clear")],
-                [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:back")],
-            ]
-        )
+            kb = InlineKeyboardMarkup(
+                inline_keyboard=item_buttons + [
+                    [InlineKeyboardButton(text="🔄 Обновить", callback_data="shorts:queue")],
+                    [InlineKeyboardButton(text="🗑 Очистить очередь", callback_data="shorts:clear")],
+                    [InlineKeyboardButton(text="🏠 Главное меню", callback_data="menu:back")],
+                ]
+            )
         if callback.message:
             await _replace_callback_message(callback.message, text, reply_markup=kb, parse_mode=ParseMode.HTML)
         await callback.answer()
