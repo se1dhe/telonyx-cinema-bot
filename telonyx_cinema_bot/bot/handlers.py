@@ -320,7 +320,7 @@ def build_router(
         await callback.answer()
 
     @router.message(StateFilter(AddShortsStates.waiting_for_url))
-    async def fsm_receive_shorts_url(message: Message, state: FSMContext) -> None:
+    async def fsm_receive_shorts_url(message: Message, state: FSMContext, bot: Bot) -> None:
         if not _is_admin_msg(message):
             return
 
@@ -459,7 +459,7 @@ def build_router(
         await message.answer("Теперь введи <b>год выпуска</b> (или 0, если не знаешь):", parse_mode=ParseMode.HTML)
 
     @router.message(StateFilter(AddShortsStates.waiting_for_movie_year))
-    async def fsm_receive_movie_year(message: Message, state: FSMContext) -> None:
+    async def fsm_receive_movie_year(message: Message, state: FSMContext, bot: Bot) -> None:
         if not _is_admin_msg(message):
             return
         year_raw = (message.text or "").strip()
