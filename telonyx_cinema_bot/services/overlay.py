@@ -69,7 +69,7 @@ async def render_with_overlay(
             f"[out]"
         ),
         "-map", "[out]", "-map", "0:a?",
-        "-c:v", "libx264", "-preset", "medium", "-crf", "18",
+        "-c:v", "libx264", "-preset", "slow", "-crf", "16",
         "-c:a", "aac", "-b:a", "256k", "-ac", "2",
         "-af", "loudnorm=I=-15:TP=-1.5:LRA=11",
         "-movflags", "+faststart", "-pix_fmt", "yuv420p",
