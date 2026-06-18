@@ -329,6 +329,7 @@ def build_router(
             await message.answer("⚠️ Нужна ссылка (начинается с http).", reply_markup=_cancel_menu())
             return
 
+        admin_id = message.from_user.id
         async with session_factory() as session:
             async with session.begin():
                 from sqlalchemy import select
@@ -336,7 +337,7 @@ def build_router(
 
                 last_time = await session.scalar(
                     select(ShortsQueue.scheduled_for)
-                    .where(ShortsQueue.status.in_([ShortsQueueStatus.pending, ShortsQueueStatus.published]))
+                    .where(ShortsQueue.status.in_([ShortsQueueStatus.pending_confirmation, ShortsQueueStatus.published]))
                     .order_by(ShortsQueue.scheduled_for.desc())
                     .limit(1)
                 )
@@ -353,27 +354,29 @@ def build_router(
                 else:
                     next_slot = now
 
-                item = ShortsQueue(url=url, status=ShortsQueueStatus.pending, scheduled_for=next_slot)
+                item = ShortsQueue(url=url, status=ShortsQueueStatus.pending_confirmation, scheduled_for=next_slot)
                 session.add(item)
                 await session.flush()
                 item_id = item.id
 
-            msg = await message.answer(
-                f"📥 Shorts #{item_id} добавлен в очередь.\n"
-                f"URL: {url}\n"
-                "Статус: <b>ожидает обработки</b>",
-                parse_mode=ParseMode.HTML,
-                reply_markup=InlineKeyboardMarkup(
-                    inline_keyboard=[
-                        [
-                            InlineKeyboardButton(text="🚀 Опубликовать сейчас", callback_data=f"shorts:publish_now:{item_id}"),
-                            InlineKeyboardButton(text="➕ Добавить еще", callback_data="shorts:add"),
-                        ],
-                    ]
-                ),
-            )
+            # Identify immediately so admin can confirm
+            from telonyx_cinema_bot.services.shorts import identify_shorts_movie
+            await identify_shorts_movie(item_id, session, bot, settings, copywriter, target_admin_id=admin_id)
+
             async with session.begin():
                 item = await session.get(ShortsQueue, item_id)
+                confirm_kb = InlineKeyboardMarkup(
+                    inline_keyboard=[
+                        [InlineKeyboardButton(text="✅ Да, обрабатывай", callback_data=f"shorts:confirm:yes:{item_id}")],
+                        [InlineKeyboardButton(text="❌ Нет, указать ручками", callback_data=f"shorts:confirm:no:{item_id}")],
+                    ]
+                )
+                msg = await message.answer(
+                    f"🎬 Определил: <b>{item.movie_title or '?'}</b> ({item.movie_year or 'N/A'})\n\n"
+                    f"Правильно?",
+                    parse_mode=ParseMode.HTML,
+                    reply_markup=confirm_kb,
+                )
                 item.admin_msg_id = msg.message_id
 
         await state.clear()
@@ -477,14 +480,28 @@ def build_router(
                     return
                 item.movie_title = title
                 item.movie_year = year
-                item.status = ShortsQueueStatus.pending
+                item.status = ShortsQueueStatus.pending_confirmation
                 item.error_message = None
 
-        await message.answer(
-            f"✅ Shorts #{item_id}: <b>{title}</b> ({year or 'год неизвестен'})\n"
-            "Поставлен в очередь на повторную обработку.",
-            parse_mode=ParseMode.HTML,
-        )
+            # Re-identify with manual title + show confirmation
+            from telonyx_cinema_bot.services.shorts import identify_shorts_movie
+            admin_id = message.from_user.id
+            await identify_shorts_movie(item_id, session, bot, settings, copywriter, target_admin_id=admin_id)
+
+            async with session.begin():
+                item = await session.get(ShortsQueue, item_id)
+                confirm_kb = InlineKeyboardMarkup(
+                    inline_keyboard=[
+                        [InlineKeyboardButton(text="✅ Да, обрабатывай", callback_data=f"shorts:confirm:yes:{item_id}")],
+                        [InlineKeyboardButton(text="❌ Нет, указать ручками", callback_data=f"shorts:confirm:no:{item_id}")],
+                    ]
+                )
+                await message.answer(
+                    f"🎬 Определил: <b>{item.movie_title or '?'}</b> ({item.movie_year or 'N/A'})\n\n"
+                    f"Правильно?",
+                    parse_mode=ParseMode.HTML,
+                    reply_markup=confirm_kb,
+                )
 
     @router.callback_query(F.data == "shorts:next_video")
     async def cb_shorts_next_video(callback: CallbackQuery, state: FSMContext) -> None:
@@ -511,34 +528,116 @@ def build_router(
             return
 
         from sqlalchemy import select
-        from datetime import timedelta
         from datetime import datetime
-        from telonyx_cinema_bot.services.shorts import process_shorts_item
+        admin_id = message.from_user.id
 
         async with session_factory() as session:
             async with session.begin():
                 now = datetime.now(settings.zoneinfo)
-                item = ShortsQueue(url=url, status=ShortsQueueStatus.pending, scheduled_for=now)
+                item = ShortsQueue(url=url, status=ShortsQueueStatus.pending_confirmation, scheduled_for=now)
                 session.add(item)
                 await session.flush()
                 item_id = item.id
 
-        try:
-            async with session_factory() as session:
-                async with session.begin():
-                    item = await session.get(ShortsQueue, item_id)
-                    if item is not None:
-                        item.status = ShortsQueueStatus.downloading
+            from telonyx_cinema_bot.services.shorts import identify_shorts_movie
+            await identify_shorts_movie(item_id, session, bot, settings, copywriter, target_admin_id=admin_id)
 
-            async with session_factory() as session:
-                await process_shorts_item(item_id, session, bot, settings, copywriter, target_admin_id=message.from_user.id)
+            async with session.begin():
+                item = await session.get(ShortsQueue, item_id)
+                confirm_kb = InlineKeyboardMarkup(
+                    inline_keyboard=[
+                        [InlineKeyboardButton(text="✅ Да, обрабатывай", callback_data=f"shorts:confirm:yes:{item_id}")],
+                        [InlineKeyboardButton(text="❌ Нет, указать ручками", callback_data=f"shorts:confirm:no:{item_id}")],
+                    ]
+                )
+                msg = await message.answer(
+                    f"🎬 Определил: <b>{item.movie_title or '?'}</b> ({item.movie_year or 'N/A'})\n\n"
+                    f"Правильно?",
+                    parse_mode=ParseMode.HTML,
+                    reply_markup=confirm_kb,
+                )
+                item.admin_msg_id = msg.message_id
 
-        except Exception as exc:
-            import logging as _logging
-            _logging.getLogger(__name__).exception("Next video processing failed for shorts %s", item_id)
-            await bot.send_message(message.from_user.id, f"❌ Ошибка при обработке Shorts #{item_id}:\n{str(exc)[:300]}")
-        finally:
-            await state.clear()
+        await state.clear()
+
+    @router.callback_query(F.data.startswith("shorts:confirm:yes:"))
+    async def cb_confirm_yes(callback: CallbackQuery, bot: Bot) -> None:
+        if not _is_admin_cb(callback):
+            await callback.answer("Только для администраторов.", show_alert=True)
+            return
+        item_id = int(callback.data.split(":")[3])
+        admin_id = callback.from_user.id
+        await callback.answer("Запускаю обработку...")
+        if callback.message:
+            await _replace_callback_message(callback.message, f"⏳ Обработка Shorts #{item_id}...")
+
+        async with session_factory() as session:
+            async with session.begin():
+                item = await session.get(ShortsQueue, item_id)
+                if item is None or item.status != ShortsQueueStatus.pending_confirmation:
+                    await bot.send_message(admin_id, "❌ Запись не найдена или уже обработана.")
+                    return
+                item.status = ShortsQueueStatus.downloading
+
+        from telonyx_cinema_bot.services.shorts import process_shorts_item
+        async with session_factory() as session:
+            await process_shorts_item(item_id, session, bot, settings, target_admin_id=admin_id)
+        
+        async with session_factory() as session:
+            item = await session.get(ShortsQueue, item_id)
+            next_btn = InlineKeyboardButton(text="⏭ Следующее видео", callback_data="shorts:next_video")
+            msg_parts = [f"✅ Shorts #{item_id} обработан."]
+            if item and item.status == ShortsQueueStatus.published:
+                msg_parts.append("📢 Telegram: опубликовано")
+                msg_parts.append("📤 Видео отправлено администратору")
+            elif item and item.status == ShortsQueueStatus.failed:
+                msg_parts.append(f"❌ Ошибка: {item.error_message or 'неизвестно'}")
+            else:
+                msg_parts.append(f"⚠️ Статус: {item.status.value if item else '???'}")
+            await bot.send_message(admin_id, "\n".join(msg_parts), reply_markup=InlineKeyboardMarkup(inline_keyboard=[[next_btn]]))
+
+    @router.callback_query(F.data.startswith("shorts:confirm:no:"))
+    async def cb_confirm_no(callback: CallbackQuery, state: FSMContext) -> None:
+        if not _is_admin_cb(callback):
+            await callback.answer("Только для администраторов.", show_alert=True)
+            return
+        item_id = int(callback.data.split(":")[3])
+        await state.update_data(shorts_item_id=item_id)
+        await state.set_state(AddShortsStates.waiting_for_movie_title)
+        if callback.message:
+            await _replace_callback_message(
+                callback.message,
+                "🎬 <b>Укажи фильм</b>\nВведи название фильма/сериала по-русски:",
+                parse_mode=ParseMode.HTML,
+                reply_markup=_cancel_menu(),
+            )
+        await callback.answer()
+
+    @router.callback_query(F.data.startswith("shorts:wrong_movie:"))
+    async def cb_wrong_movie(callback: CallbackQuery, state: FSMContext) -> None:
+        if not _is_admin_cb(callback):
+            await callback.answer("Только для администраторов.", show_alert=True)
+            return
+        item_id = int(callback.data.split(":")[2])
+        async with session_factory() as session:
+            async with session.begin():
+                item = await session.get(ShortsQueue, item_id)
+                if item:
+                    item.status = ShortsQueueStatus.pending_confirmation
+                    item.movie_title = None
+                    item.movie_year = None
+                    item.tmdb_id = None
+                    item.error_message = None
+        await state.update_data(shorts_item_id=item_id)
+        await state.set_state(AddShortsStates.waiting_for_movie_title)
+        if callback.message:
+            await _replace_callback_message(
+                callback.message,
+                f"🎬 Shorts #{item_id}\nФильм сброшен. Введи <b>название</b> по-русски:",
+                parse_mode=ParseMode.HTML,
+                reply_markup=_cancel_menu(),
+            )
+        await callback.answer()
 
     @router.callback_query(F.data == "shorts:queue")
     async def cb_shorts_queue(callback: CallbackQuery) -> None:
@@ -551,7 +650,7 @@ def build_router(
         async with session_factory() as session:
             result = await session.execute(
                 select(ShortsQueue)
-                .where(ShortsQueue.status.in_([ShortsQueueStatus.pending, ShortsQueueStatus.failed]))
+                .where(ShortsQueue.status.in_([ShortsQueueStatus.pending, ShortsQueueStatus.failed, ShortsQueueStatus.pending_confirmation]))
                 .order_by(ShortsQueue.id.desc())
                 .limit(20)
             )
@@ -617,13 +716,14 @@ def build_router(
             async with session_factory() as session:
                 async with session.begin():
                     item = await session.get(ShortsQueue, item_id)
-                    if item is None or item.status not in (ShortsQueueStatus.pending, ShortsQueueStatus.failed):
+                    if item is None or item.status not in (ShortsQueueStatus.pending, ShortsQueueStatus.failed, ShortsQueueStatus.pending_confirmation):
                         await bot.send_message(admin_id, "❌ Запись не найдена или уже обрабатывается.")
                         return
                     item.status = ShortsQueueStatus.downloading
 
+            from telonyx_cinema_bot.services.shorts import process_shorts_item
             async with session_factory() as session:
-                await process_shorts_item(item_id, session, bot, settings, copywriter, target_admin_id=admin_id)
+                await process_shorts_item(item_id, session, bot, settings, target_admin_id=admin_id)
 
             async with session_factory() as session:
                 item = await session.get(ShortsQueue, item_id)
@@ -660,7 +760,7 @@ def build_router(
             async with session.begin():
                 result = await session.execute(
                     delete(ShortsQueue)
-                    .where(ShortsQueue.status.in_([ShortsQueueStatus.pending, ShortsQueueStatus.failed]))
+                    .where(ShortsQueue.status.in_([ShortsQueueStatus.pending, ShortsQueueStatus.failed, ShortsQueueStatus.pending_confirmation]))
                 )
                 deleted_count = result.rowcount
 

@@ -107,7 +107,7 @@ async def download_video(url: str, output_dir: Path, yt_dlp_bin: str, *, cookies
     raise RuntimeError("No video file found after download")
 
 
-async def process_shorts_item(
+async def identify_shorts_movie(
     item_id: int,
     session: Any,
     bot: Any,
@@ -115,7 +115,91 @@ async def process_shorts_item(
     copywriter: GeminiCopywriter,
     *,
     target_admin_id: int | None = None,
+) -> bool:
+    """Identify movie from YouTube title. Returns True if title found (TMDb may still be missing)."""
+    from sqlalchemy import select
+
+    result = await session.execute(select(ShortsQueue).where(ShortsQueue.id == item_id))
+    item: ShortsQueue | None = result.scalar_one_or_none()
+    if item is None:
+        logger.warning("ShortsQueue item %s not found for identification", item_id)
+        return False
+
+    cookies_path = init_cookies_file(settings)
+    admin_id = target_admin_id or (settings.admin_user_ids[0] if settings.admin_user_ids else 0)
+
+    if not item.movie_title:
+        raw_meta = await extract_yt_metadata(item.url, settings.yt_dlp_bin, cookies=cookies_path)
+        raw_title = (raw_meta or {}).get("title", "") or ""
+        ai_title, ai_year = await copywriter.identify_movie_from_title(raw_title)
+        item.yt_raw_title = raw_title
+    else:
+        ai_title = item.movie_title
+        ai_year = item.movie_year or ""
+
+    # Primary: TMDb search (multi-strategy)
+    tmdb = TMDbClient(settings.tmdb_api_key)
+    movie = await tmdb.search_best_match(ai_title, year=ai_year)
+
+    # Fallback: OMDb → TMDb by imdbID
+    if not movie and settings.omdb_api_key:
+        from telonyx_cinema_bot.services.omdb import OMDbClient
+
+        omdb = OMDbClient(settings.omdb_api_key)
+        omdb_result = await omdb.search(ai_title, year=ai_year)
+        if omdb_result and omdb_result.imdb_id:
+            logger.info("OMDb found %s (%s), trying TMDb find", omdb_result.imdb_id, omdb_result.title)
+            movie = await tmdb.find_by_imdb_id(omdb_result.imdb_id)
+
+    if movie:
+        item.movie_title = movie.title
+        item.movie_year = str(movie.release_year or "")
+        item.movie_genre = movie.genres[0] if movie.genres else ""
+        item.tmdb_id = movie.tmdb_id
+    else:
+        item.movie_title = ai_title
+        item.movie_year = ai_year or ""
+        item.movie_genre = ""
+        item.tmdb_id = None
+
+    await session.flush()
+
+    if not item.movie_title:
+        if admin_id:
+            from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+            kb = InlineKeyboardMarkup(
+                inline_keyboard=[[
+                    InlineKeyboardButton(
+                        text="🎬 Указать фильм",
+                        callback_data=f"shorts:identify:{item_id}",
+                    )
+                ]]
+            )
+            await bot.send_message(
+                admin_id,
+                f"⚠️ Shorts #{item_id}: не удалось определить фильм.\n"
+                f"YouTube: {item.url}\n\n"
+                "Укажи фильм вручную.",
+                parse_mode="HTML",
+                reply_markup=kb,
+            )
+        item.status = ShortsQueueStatus.failed
+        item.error_message = "Фильм не определён"
+        return False
+
+    return True
+
+
+async def process_shorts_item(
+    item_id: int,
+    session: Any,
+    bot: Any,
+    settings: Settings,
+    *,
+    target_admin_id: int | None = None,
 ) -> None:
+    """Download, render, post card, and send admin the result. Expects movie already identified."""
     from sqlalchemy import select
 
     result = await session.execute(select(ShortsQueue).where(ShortsQueue.id == item_id))
@@ -128,73 +212,19 @@ async def process_shorts_item(
     work_dir.mkdir(parents=True, exist_ok=True)
 
     cookies_path = init_cookies_file(settings)
+    admin_id = target_admin_id or (settings.admin_user_ids[0] if settings.admin_user_ids else 0)
 
     try:
-        admin_id = target_admin_id or (settings.admin_user_ids[0] if settings.admin_user_ids else 0)
+        if not item.movie_title:
+            logger.error("Item %s has no movie_title — run identify_shorts_movie first", item_id)
+            item.status = ShortsQueueStatus.failed
+            item.error_message = "Фильм не был определён перед обработкой"
+            return
+
         item.status = ShortsQueueStatus.downloading
         await session.flush()
 
         video_path = await download_video(item.url, work_dir, settings.yt_dlp_bin, cookies=cookies_path)
-
-        if not item.movie_title or not item.tmdb_id:
-            if not item.movie_title:
-                raw_meta = await extract_yt_metadata(item.url, settings.yt_dlp_bin, cookies=cookies_path)
-                raw_title = (raw_meta or {}).get("title", "") or ""
-                ai_title, ai_year = await copywriter.identify_movie_from_title(raw_title)
-                item.yt_raw_title = raw_title
-            else:
-                ai_title = item.movie_title
-                ai_year = item.movie_year or ""
-
-            # Primary: TMDb search (multi-strategy)
-            tmdb = TMDbClient(settings.tmdb_api_key)
-            movie = await tmdb.search_best_match(ai_title, year=ai_year)
-
-            # Fallback: OMDb → TMDb by imdbID
-            if not movie and settings.omdb_api_key:
-                from telonyx_cinema_bot.services.omdb import OMDbClient
-
-                omdb = OMDbClient(settings.omdb_api_key)
-                omdb_result = await omdb.search(ai_title, year=ai_year)
-                if omdb_result and omdb_result.imdb_id:
-                    logger.info("OMDb found %s (%s), trying TMDb find", omdb_result.imdb_id, omdb_result.title)
-                    movie = await tmdb.find_by_imdb_id(omdb_result.imdb_id)
-
-            if movie:
-                item.movie_title = movie.title
-                item.movie_year = str(movie.release_year or "")
-                item.movie_genre = movie.genres[0] if movie.genres else ""
-                item.tmdb_id = movie.tmdb_id
-            else:
-                item.movie_title = ai_title
-                item.movie_year = ai_year or ""
-                item.movie_genre = ""
-                item.tmdb_id = None  # ensure no card is posted
-
-            if not movie and not item.movie_title:
-                # No title at all — stop and ask admin
-                if admin_id:
-                    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-
-                    kb = InlineKeyboardMarkup(
-                        inline_keyboard=[[
-                            InlineKeyboardButton(
-                                text="🎬 Указать фильм",
-                                callback_data=f"shorts:identify:{item_id}",
-                            )
-                        ]]
-                    )
-                    await bot.send_message(
-                        admin_id,
-                        f"⚠️ Shorts #{item_id}: не удалось определить фильм.\n"
-                        f"YouTube: {item.url}\n\n"
-                        "Укажи фильм вручную.",
-                        parse_mode="HTML",
-                        reply_markup=kb,
-                    )
-                item.status = ShortsQueueStatus.failed
-                item.error_message = "Фильм не определён"
-                return
 
         item.status = ShortsQueueStatus.rendering
         await session.flush()
@@ -206,9 +236,6 @@ async def process_shorts_item(
             output_path=output_path,
             work_dir=work_dir,
         )
-
-        item.status = ShortsQueueStatus.ready
-        await session.flush()
 
         # 4. Post Telegram card (7-day dedup)
         from telonyx_cinema_bot.services.movie_card import format_movie_card, generate_tiktok_caption
@@ -287,13 +314,14 @@ async def process_shorts_item(
                 logger.info("No TMDb data for item %s — skipping Telegram card", item_id)
             item.telegram_file_id = None
 
-        # 5. TikTok caption with movie title + Telegram pitch + viral hashtags
+        # 5. TikTok caption
         tiktok_caption = generate_tiktok_caption(card_movie, telegram_url, fallback_title=item.movie_title or "Фильм")
 
-        # 6. Send admin a download link + TikTok caption + Next button
+        # 6. Send admin result + next button + wrong movie button
         if admin_id:
             from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
             next_button = InlineKeyboardButton(text="⏭ Следующее видео", callback_data="shorts:next_video")
+            wrong_button = InlineKeyboardButton(text="💥 Не тот фильм", callback_data=f"shorts:wrong_movie:{item_id}")
             if domain:
                 download_link = f"{domain}/shorts/{item_id}"
                 admin_text = (
@@ -307,7 +335,7 @@ async def process_shorts_item(
                     admin_text,
                     parse_mode="HTML",
                     disable_web_page_preview=False,
-                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[[next_button]]),
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[[next_button], [wrong_button]]),
                 )
             else:
                 await bot.send_message(
@@ -316,7 +344,7 @@ async def process_shorts_item(
                     f"📝 Подпись для TikTok:\n<code>{tiktok_caption}</code>\n\n"
                     f"⚠️ PUBLIC_DOMAIN не настроен — ссылку на скачивание сгенерировать не удалось.",
                     parse_mode="HTML",
-                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[[next_button]]),
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[[next_button], [wrong_button]]),
                 )
 
         # 7. Mark published
@@ -325,8 +353,6 @@ async def process_shorts_item(
         item.published_at = datetime.now(timezone.utc)
 
         if item.admin_msg_id:
-            from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-            next_button = InlineKeyboardButton(text="⏭ Следующее видео", callback_data="shorts:next_video")
             await bot.edit_message_text(
                 chat_id=admin_id if admin_id else 0,
                 message_id=item.admin_msg_id,
@@ -334,7 +360,8 @@ async def process_shorts_item(
                 reply_markup=InlineKeyboardMarkup(
                     inline_keyboard=[
                         [InlineKeyboardButton(text="📺 Посмотреть", url=telegram_url)],
-                        [next_button],
+                        [InlineKeyboardButton(text="⏭ Следующее видео", callback_data="shorts:next_video")],
+                        [InlineKeyboardButton(text="💥 Не тот фильм", callback_data=f"shorts:wrong_movie:{item_id}")],
                     ]
                 ),
                 disable_web_page_preview=True,
@@ -369,6 +396,3 @@ async def process_shorts_item(
 
     finally:
         await session.commit()
-
-
-
