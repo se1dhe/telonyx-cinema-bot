@@ -165,11 +165,11 @@ async def process_shorts_item(
                 )
                 await bot.send_message(
                     admin_id,
-                    f"⚠️ Shorts #{item_id}: не удалось определить фильм по TMDb.\n"
+                    f"⚠️ Shorts #{item_id}: фильм не найден в TMDb.\n"
                     f"YouTube: {item.url}\n"
-                    f"AI определил: <b>{ai_title}</b> ({ai_year or '?'})\n\n"
-                    "Видео будет загружено в TikTok, но карточка фильма в Telegram "
-                    "не опубликована. Укажи фильм вручную.",
+                    f"AI: <b>{ai_title}</b> ({ai_year or '?'})\n\n"
+                    "TikTok будет загружен, карточка в Telegram пропущена. "
+                    "Укажи фильм вручную, чтобы опубликовать карточку.",
                     parse_mode="HTML",
                     reply_markup=kb,
                 )
@@ -185,34 +185,36 @@ async def process_shorts_item(
             work_dir=work_dir,
         )
 
-        description = await copywriter.generate_shorts_description(
-            raw_title=item.yt_raw_title or item.movie_title or "",
-            movie_title=item.movie_title or "",
-            movie_year=item.movie_year or "",
-            movie_genre=item.movie_genre or "",
-        )
-
         item.status = ShortsQueueStatus.ready
         await session.flush()
 
-        if settings.tiktok_account_name:
-            logger.info("Uploading to TikTok as %s", settings.tiktok_account_name)
-            storage_dir = Path(settings.storage_dir)
-            tiktok_ok = await upload_to_tiktok(
-                video_path=output_path,
-                title=description,
-                account_name=settings.tiktok_account_name,
-                storage_dir=storage_dir,
+        # If movie not identified — skip Telegram card, just do TikTok
+        if not item.tmdb_id:
+            channel = settings.channel_link or f"https://t.me/c/{settings.telegram_channel_id.replace('-100', '')}"
+            tiktok_caption = (
+                "🎬 Кто это? Что за фильм? 👀\n\n"
+                "Полное название и разбор — в нашем Telegram 👇\n"
+                f"{channel}\n\n"
+                "#кино #shorts #telonyx_cinema"
             )
-            if tiktok_ok:
-                logger.info("TikTok upload complete")
-            else:
-                logger.warning("TikTok upload failed, continuing to Telegram")
+            if settings.tiktok_account_name:
+                storage_dir = Path(settings.storage_dir)
+                await upload_to_tiktok(
+                    video_path=output_path,
+                    title=tiktok_caption,
+                    account_name=settings.tiktok_account_name,
+                    storage_dir=storage_dir,
+                )
+            item.video_path = str(output_path)
+            item.status = ShortsQueueStatus.published
+            item.published_at = datetime.now(timezone.utc)
+            await session.flush()
+            return
 
+        # 1. Post Telegram card first (to get the URL for TikTok caption)
         from telonyx_cinema_bot.services.movie_card import format_movie_card
         from telonyx_cinema_bot.services.tmdb import MovieMetadata
 
-        # Get full movie metadata for the card
         card_movie: MovieMetadata | None = None
         if item.tmdb_id:
             try:
@@ -231,7 +233,6 @@ async def process_shorts_item(
             f"<b>{item.movie_title or 'Фильм'}</b>"
         )
 
-        # Download poster
         poster_path: Path | None = None
         poster_url = card_movie.poster_url if card_movie else None
         if poster_url:
@@ -265,6 +266,31 @@ async def process_shorts_item(
                 disable_web_page_preview=True,
             )
             item.telegram_file_id = None
+
+        telegram_url = msg.get_url()
+
+        # 2. TikTok caption — teaser without movie name, drives to Telegram
+        tiktok_caption = (
+            "🎬 Кто это? Что за фильм? 👀\n\n"
+            "Полное название и разбор — в нашем Telegram 👇\n"
+            f"{telegram_url}\n\n"
+            "#кино #shorts #telonyx_cinema"
+        )
+
+        # 3. Upload to TikTok
+        if settings.tiktok_account_name:
+            logger.info("Uploading to TikTok as %s", settings.tiktok_account_name)
+            storage_dir = Path(settings.storage_dir)
+            tiktok_ok = await upload_to_tiktok(
+                video_path=output_path,
+                title=tiktok_caption,
+                account_name=settings.tiktok_account_name,
+                storage_dir=storage_dir,
+            )
+            if tiktok_ok:
+                logger.info("TikTok upload complete")
+            else:
+                logger.warning("TikTok upload failed")
 
         item.video_path = str(output_path)
         item.status = ShortsQueueStatus.published
