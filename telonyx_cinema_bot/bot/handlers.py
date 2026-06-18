@@ -26,6 +26,7 @@ class AddShortsStates(StatesGroup):
     waiting_for_url = State()
     waiting_for_movie_title = State()
     waiting_for_movie_year = State()
+    waiting_for_next_url = State()
 
 
 def _main_menu() -> InlineKeyboardMarkup:
@@ -485,6 +486,60 @@ def build_router(
             parse_mode=ParseMode.HTML,
         )
 
+    @router.callback_query(F.data == "shorts:next_video")
+    async def cb_shorts_next_video(callback: CallbackQuery, state: FSMContext) -> None:
+        if not _is_admin_cb(callback):
+            await callback.answer("Только для администраторов.", show_alert=True)
+            return
+        await state.set_state(AddShortsStates.waiting_for_next_url)
+        if callback.message:
+            await _replace_callback_message(
+                callback.message,
+                "🎬 <b>Следующее видео</b>\nПришли ссылку на YouTube Shorts.",
+                reply_markup=_cancel_menu(),
+                parse_mode="HTML",
+            )
+        await callback.answer()
+
+    @router.message(StateFilter(AddShortsStates.waiting_for_next_url))
+    async def fsm_receive_next_url(message: Message, state: FSMContext, bot: Bot) -> None:
+        if not _is_admin_msg(message):
+            return
+        url = (message.text or "").strip()
+        if not url.startswith("http"):
+            await message.answer("⚠️ Нужна ссылка (начинается с http).", reply_markup=_cancel_menu())
+            return
+
+        from sqlalchemy import select
+        from datetime import timedelta
+        from datetime import datetime
+        from telonyx_cinema_bot.services.shorts import process_shorts_item
+
+        async with session_factory() as session:
+            async with session.begin():
+                now = datetime.now(settings.zoneinfo)
+                item = ShortsQueue(url=url, status=ShortsQueueStatus.pending, scheduled_for=now)
+                session.add(item)
+                await session.flush()
+                item_id = item.id
+
+        try:
+            async with session_factory() as session:
+                async with session.begin():
+                    item = await session.get(ShortsQueue, item_id)
+                    if item is not None:
+                        item.status = ShortsQueueStatus.downloading
+
+            async with session_factory() as session:
+                await process_shorts_item(item_id, session, bot, settings, copywriter, target_admin_id=message.from_user.id)
+
+        except Exception as exc:
+            import logging as _logging
+            _logging.getLogger(__name__).exception("Next video processing failed for shorts %s", item_id)
+            await bot.send_message(message.from_user.id, f"❌ Ошибка при обработке Shorts #{item_id}:\n{str(exc)[:300]}")
+        finally:
+            await state.clear()
+
     @router.callback_query(F.data == "shorts:queue")
     async def cb_shorts_queue(callback: CallbackQuery) -> None:
         if not _is_admin_cb(callback):
@@ -568,10 +623,11 @@ def build_router(
                     item.status = ShortsQueueStatus.downloading
 
             async with session_factory() as session:
-                await process_shorts_item(item_id, session, bot, settings, copywriter)
+                await process_shorts_item(item_id, session, bot, settings, copywriter, target_admin_id=admin_id)
 
             async with session_factory() as session:
                 item = await session.get(ShortsQueue, item_id)
+                next_btn = InlineKeyboardButton(text="⏭ Следующее видео", callback_data="shorts:next_video")
                 msg_parts = [f"✅ Shorts #{item_id} обработан."]
                 if item and item.status == ShortsQueueStatus.published:
                     msg_parts.append("📢 Telegram: опубликовано")
@@ -581,7 +637,11 @@ def build_router(
                 else:
                     msg_parts.append(f"⚠️ Статус: {item.status.value if item else '???'}")
 
-                await bot.send_message(admin_id, "\n".join(msg_parts))
+                await bot.send_message(
+                    admin_id,
+                    "\n".join(msg_parts),
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[[next_btn]]),
+                )
 
         except Exception as exc:
             import logging as _logging

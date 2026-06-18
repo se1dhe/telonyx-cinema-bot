@@ -113,6 +113,8 @@ async def process_shorts_item(
     bot: Any,
     settings: Settings,
     copywriter: GeminiCopywriter,
+    *,
+    target_admin_id: int | None = None,
 ) -> None:
     from sqlalchemy import select
 
@@ -128,6 +130,7 @@ async def process_shorts_item(
     cookies_path = init_cookies_file(settings)
 
     try:
+        admin_id = target_admin_id or (settings.admin_user_ids[0] if settings.admin_user_ids else 0)
         item.status = ShortsQueueStatus.downloading
         await session.flush()
 
@@ -170,10 +173,9 @@ async def process_shorts_item(
 
             if not movie and not item.movie_title:
                 # No title at all — stop and ask admin
-                if settings.admin_user_ids:
+                if admin_id:
                     from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-                    admin_id = settings.admin_user_ids[0]
                     kb = InlineKeyboardMarkup(
                         inline_keyboard=[[
                             InlineKeyboardButton(
@@ -286,10 +288,10 @@ async def process_shorts_item(
         # 5. TikTok caption with movie title + Telegram pitch + viral hashtags
         tiktok_caption = generate_tiktok_caption(card_movie, telegram_url, fallback_title=item.movie_title or "Фильм")
 
-        # 6. Send admin a download link + TikTok caption for manual upload
-        if settings.admin_user_ids:
-            admin_id = settings.admin_user_ids[0]
+        # 6. Send admin a download link + TikTok caption + Next button
+        if admin_id:
             domain = settings.resolved_public_domain
+            next_button = InlineKeyboardButton(text="⏭ Следующее видео", callback_data="shorts:next_video")
             if domain:
                 download_link = f"{domain}/shorts/{item_id}"
                 admin_text = (
@@ -298,7 +300,13 @@ async def process_shorts_item(
                     f"📝 <b>Подпись для TikTok (скопируйте):</b>\n"
                     f"<code>{tiktok_caption}</code>"
                 )
-                await bot.send_message(admin_id, admin_text, parse_mode="HTML", disable_web_page_preview=False)
+                await bot.send_message(
+                    admin_id,
+                    admin_text,
+                    parse_mode="HTML",
+                    disable_web_page_preview=False,
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[[next_button]]),
+                )
             else:
                 await bot.send_message(
                     admin_id,
@@ -306,6 +314,7 @@ async def process_shorts_item(
                     f"📝 Подпись для TikTok:\n<code>{tiktok_caption}</code>\n\n"
                     f"⚠️ PUBLIC_DOMAIN не настроен — ссылку на скачивание сгенерировать не удалось.",
                     parse_mode="HTML",
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[[next_button]]),
                 )
 
         # 7. Mark published
@@ -315,13 +324,16 @@ async def process_shorts_item(
 
         if item.admin_msg_id:
             from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-
+            next_button = InlineKeyboardButton(text="⏭ Следующее видео", callback_data="shorts:next_video")
             await bot.edit_message_text(
-                chat_id=settings.admin_user_ids[0] if settings.admin_user_ids else 0,
+                chat_id=admin_id if admin_id else 0,
                 message_id=item.admin_msg_id,
                 text=f"✅ Опубликовано: {item.movie_title or '?'}\n{telegram_url}",
                 reply_markup=InlineKeyboardMarkup(
-                    inline_keyboard=[[InlineKeyboardButton(text="📺 Посмотреть", url=telegram_url)]]
+                    inline_keyboard=[
+                        [InlineKeyboardButton(text="📺 Посмотреть", url=telegram_url)],
+                        [next_button],
+                    ]
                 ),
                 disable_web_page_preview=True,
             )
@@ -331,10 +343,9 @@ async def process_shorts_item(
         item.status = ShortsQueueStatus.failed
         item.error_message = str(exc)[:1000]
 
-        if settings.admin_user_ids:
+        if admin_id:
             from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-            admin_id = settings.admin_user_ids[0]
             buttons = [
                 [InlineKeyboardButton(text="🔄 Повторить", callback_data=f"shorts:retry:{item_id}")],
             ]
