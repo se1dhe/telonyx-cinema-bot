@@ -94,7 +94,7 @@ async def download_video(url: str, output_dir: Path, yt_dlp_bin: str, *, cookies
         "--merge-output-format", "mp4",
         "--remux-video", "mp4",
         "--remote-components", "ejs:npm",
-        "--format", "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080]",
+        "--format", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best",
         "--output", output_template,
     ]
     cmd.extend(_cookies_args(cookies))
