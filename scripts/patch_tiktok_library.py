@@ -18,6 +18,11 @@ pattern = (
 )
 
 replacement = (
+    '\t# Deduplicate by name — keep last occurrence to avoid CookieConflictError\n'
+    '\tseen = {}\n'
+    '\tfor c in cookies:\n'
+    '\t\tseen[c["name"]] = c\n'
+    '\tcookies = list(seen.values())\n'
     '\tfor c in cookies:\n'
     '\t\tif "domain" in c:\n'
     '\t\t\tcookies_domain = c["domain"]\n'
