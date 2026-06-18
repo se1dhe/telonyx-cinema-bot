@@ -241,6 +241,8 @@ async def process_shorts_item(
             if recent_card is None:
                 should_post_card = True
 
+        domain = settings.resolved_public_domain
+
         if should_post_card:
             card_text = format_movie_card(card_movie)
             poster_path: Path | None = None
