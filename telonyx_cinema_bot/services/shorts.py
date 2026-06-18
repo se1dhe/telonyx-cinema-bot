@@ -290,7 +290,7 @@ async def process_shorts_item(
 
         # 6. Send admin a download link + TikTok caption + Next button
         if admin_id:
-            domain = settings.resolved_public_domain
+            from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
             next_button = InlineKeyboardButton(text="⏭ Следующее видео", callback_data="shorts:next_video")
             if domain:
                 download_link = f"{domain}/shorts/{item_id}"
