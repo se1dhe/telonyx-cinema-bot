@@ -197,7 +197,7 @@ async def process_shorts_item(
         await session.flush()
 
         # 1. Post Telegram card first (to get the URL for TikTok caption)
-        from telonyx_cinema_bot.services.movie_card import format_movie_card
+        from telonyx_cinema_bot.services.movie_card import format_movie_card, generate_tiktok_caption
         from telonyx_cinema_bot.services.tmdb import MovieMetadata
 
         card_movie: MovieMetadata | None = None
@@ -254,13 +254,8 @@ async def process_shorts_item(
 
         telegram_url = msg.get_url()
 
-        # 2. TikTok caption — teaser without movie name, drives to Telegram
-        tiktok_caption = (
-            "🎬 Кто это? Что за фильм? 👀\n\n"
-            "Полное название и разбор — в нашем Telegram 👇\n"
-            f"{telegram_url}\n\n"
-            "#кино #shorts #telonyx_cinema"
-        )
+        # 2. TikTok caption with movie title + Telegram pitch + viral hashtags
+        tiktok_caption = generate_tiktok_caption(card_movie, telegram_url)
 
         # 3. Upload to TikTok
         if settings.tiktok_account_name:

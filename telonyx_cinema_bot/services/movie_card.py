@@ -30,8 +30,7 @@ def format_movie_card(movie: MovieMetadata) -> str:
         lines.append(f"👥 <b>В ролях:</b>\n{cast_str}")
 
     if movie.imdb_rating:
-        rating = movie.imdb_rating
-        lines.append(f"⭐️ <b>Рейтинг:</b> {rating}/10")
+        lines.append(f"⭐️ <b>Рейтинг:</b> {movie.imdb_rating}/10")
 
     if movie.overview:
         lines.append("")
@@ -43,6 +42,50 @@ def format_movie_card(movie: MovieMetadata) -> str:
         lines.append(f"🔗 <a href='{imdb_link}'>Смотреть на IMDb</a>")
 
     return "\n".join(lines)
+
+
+def generate_tiktok_caption(movie: MovieMetadata | None, telegram_url: str) -> str:
+    title_line = movie.display_title if movie else "Новинка кино"
+    pitch = "Разборы, интересные факты и подборки на вечер — в нашем Telegram 👇"
+
+    hashtags: list[str] = []
+
+    if movie:
+        tag = _clean_hashtag(movie.title)
+        if tag:
+            hashtags.append(f"#{tag}")
+        for c in movie.cast[:3]:
+            name = _clean_hashtag(c["name"])
+            if name and len(hashtags) < 10:
+                hashtags.append(f"#{name}")
+        for genre in movie.genres[:2]:
+            g = _clean_hashtag(genre)
+            if g and len(hashtags) < 10:
+                hashtags.append(f"#{g}")
+
+    viral = ["#кино", "#shorts", "#кинообзор", "#рекомендации", "#чтопосмотреть"]
+    for tag in viral:
+        if len(hashtags) < 10:
+            hashtags.append(tag)
+
+    return (
+        f"🎬 {title_line}\n\n"
+        f"{pitch}\n"
+        f"{telegram_url}\n\n"
+        f"{' '.join(hashtags)}"
+    )
+
+
+def _clean_hashtag(text: str) -> str:
+    cleaned = ""
+    for ch in text:
+        if ch.isalnum() or ch in ("_",):
+            cleaned += ch
+        elif ch in (" ", "-", ".", ":", "!", "?", "'", '"', ",", "(", ")"):
+            cleaned += ""
+        else:
+            cleaned += ""
+    return cleaned
 
 
 def _imdb_url(imdb_id: str | None) -> str | None:
