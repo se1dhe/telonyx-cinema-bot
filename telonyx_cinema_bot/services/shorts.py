@@ -261,10 +261,11 @@ async def process_shorts_item(
             if poster_path:
                 from aiogram.types import FSInputFile
 
+                caption = card_text[:1021] + "..." if len(card_text) > 1024 else card_text
                 msg = await bot.send_photo(
                     settings.telegram_channel_id,
                     photo=FSInputFile(str(poster_path)),
-                    caption=card_text,
+                    caption=caption,
                     parse_mode="HTML",
                 )
                 item.telegram_file_id = msg.photo[-1].file_id if msg.photo else None
