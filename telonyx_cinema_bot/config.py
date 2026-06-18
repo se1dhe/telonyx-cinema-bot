@@ -34,8 +34,20 @@ class Settings(BaseSettings):
     yt_dlp_cookies_file: str | None = Field(default=None, alias="YT_DLP_COOKIES_FILE")
     omdb_api_key: str | None = Field(default=None, alias="OMDB_API_KEY")
     tiktok_draft_only: bool = Field(default=False, alias="TIKTOK_DRAFT_ONLY")
+    public_domain: str | None = Field(default=None, alias="PUBLIC_DOMAIN")
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore", populate_by_name=True)
+
+    @property
+    def resolved_public_domain(self) -> str | None:
+        """Return public domain for file serving (Railway auto-detects RAILWAY_PUBLIC_DOMAIN)."""
+        if self.public_domain:
+            return self.public_domain.rstrip("/")
+        import os
+        railway_domain = os.environ.get("RAILWAY_PUBLIC_DOMAIN")
+        if railway_domain:
+            return f"https://{railway_domain}"
+        return None
 
     @field_validator("database_url", mode="before")
     @classmethod

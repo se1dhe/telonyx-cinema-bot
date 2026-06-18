@@ -286,21 +286,27 @@ async def process_shorts_item(
         # 5. TikTok caption with movie title + Telegram pitch + viral hashtags
         tiktok_caption = generate_tiktok_caption(card_movie, telegram_url, fallback_title=item.movie_title or "Фильм")
 
-        # 6. Send video + caption to admin for manual TikTok upload
+        # 6. Send admin a download link + TikTok caption for manual upload
         if settings.admin_user_ids:
-            from aiogram.types import FSInputFile as _FSInputFile
-
             admin_id = settings.admin_user_ids[0]
-            try:
-                await bot.send_video(
-                    admin_id,
-                    video=_FSInputFile(str(output_path)),
-                    caption=f"🎬 <b>{item.movie_title or 'Фильм'}</b>\n\n{tiktok_caption}",
-                    parse_mode="HTML",
-                    supports_streaming=True,
+            domain = settings.resolved_public_domain
+            if domain:
+                download_link = f"{domain}/shorts/{item_id}"
+                admin_text = (
+                    f"🎬 <b>{item.movie_title or 'Фильм'}</b>\n\n"
+                    f"📥 <a href='{download_link}'>Скачать видео</a>\n\n"
+                    f"📝 <b>Подпись для TikTok (скопируйте):</b>\n"
+                    f"<code>{tiktok_caption}</code>"
                 )
-            except Exception:
-                logger.exception("Failed to send rendered video to admin %s", admin_id)
+                await bot.send_message(admin_id, admin_text, parse_mode="HTML", disable_web_page_preview=False)
+            else:
+                await bot.send_message(
+                    admin_id,
+                    f"🎬 <b>{item.movie_title or 'Фильм'}</b>\n\n"
+                    f"📝 Подпись для TikTok:\n<code>{tiktok_caption}</code>\n\n"
+                    f"⚠️ PUBLIC_DOMAIN не настроен — ссылку на скачивание сгенерировать не удалось.",
+                    parse_mode="HTML",
+                )
 
         # 7. Mark published
         item.video_path = str(output_path)
