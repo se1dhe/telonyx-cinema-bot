@@ -4,45 +4,52 @@ from telonyx_cinema_bot.services.tmdb import MovieMetadata
 
 
 def format_movie_card(movie: MovieMetadata) -> str:
-    lines: list[str] = []
+    """Build Telegram card. Overview is dynamically truncated to fit 1024-char caption limit."""
+    body_lines: list[str] = []
 
-    lines.append(f"<b>{movie.title}</b>")
+    body_lines.append(f"<b>{movie.title}</b>")
     if movie.original_title and movie.original_title.lower() != movie.title.lower():
-        lines.append(f"<i>{movie.original_title}</i>")
+        body_lines.append(f"<i>{movie.original_title}</i>")
 
-    lines.append("")
-
-    meta_parts = []
+    parts: list[str] = []
     if movie.release_year:
-        meta_parts.append(f"📅 <b>Год:</b> {movie.release_year}")
+        parts.append(f"📅 <b>Год:</b> {movie.release_year}")
     if movie.genres:
-        meta_parts.append(f"🎭 <b>Жанр:</b> {', '.join(movie.genres)}")
-    lines.extend(meta_parts)
+        parts.append(f"🎭 <b>Жанр:</b> {', '.join(movie.genres)}")
+    body_lines.extend(parts)
 
     if movie.director:
-        lines.append(f"🎬 <b>Режиссёр:</b> {movie.director}")
+        body_lines.append(f"🎬 <b>Режиссёр:</b> {movie.director}")
 
     if movie.cast:
         cast_str = "\n".join(
             f"  👤 <b>{c['name']}</b> — {c['character']}"
             for c in movie.cast[:2]
         )
-        lines.append(f"👥 <b>В ролях:</b>\n{cast_str}")
+        body_lines.append(f"👥 <b>В ролях:</b>\n{cast_str}")
 
     if movie.imdb_rating:
-        lines.append(f"⭐️ <b>Рейтинг:</b> {movie.imdb_rating}/10")
+        body_lines.append(f"⭐️ <b>Рейтинг:</b> {movie.imdb_rating}/10")
 
-    if movie.overview:
-        lines.append("")
-        ov = movie.overview
-        lines.append(f"{ov[:200]}..." if len(ov) > 200 else ov)
+    body = "\n".join(body_lines)
 
+    # Footer — IMDb link
+    footer = ""
     imdb_link = _imdb_url(movie.imdb_id)
     if imdb_link:
-        lines.append("")
-        lines.append(f"🔗 <a href='{imdb_link}'>Смотреть на IMDb</a>")
+        footer = f"\n\n🔗 <a href='{imdb_link}'>Смотреть на IMDb</a>"
 
-    return "\n".join(lines)
+    # Dynamic overview: only the overview is truncated if needed
+    remaining = 1024 - len(body) - len(footer)
+    overview = ""
+    if movie.overview and remaining > 50:
+        text_available = remaining - 2  # "\n\n" separator
+        if len(movie.overview) > text_available:
+            overview = f"\n\n{movie.overview[:text_available - 3]}..."
+        else:
+            overview = f"\n\n{movie.overview}"
+
+    return body + overview + footer
 
 
 def generate_tiktok_caption(movie: MovieMetadata | None, telegram_url: str, *, fallback_title: str = "Новинка кино") -> str:
