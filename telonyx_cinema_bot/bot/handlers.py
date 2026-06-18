@@ -337,7 +337,7 @@ def build_router(
 
                 last_time = await session.scalar(
                     select(ShortsQueue.scheduled_for)
-                    .where(ShortsQueue.status.in_([ShortsQueueStatus.pending_confirmation, ShortsQueueStatus.published]))
+                    .where(ShortsQueue.status.in_([ShortsQueueStatus.confirm, ShortsQueueStatus.published]))
                     .order_by(ShortsQueue.scheduled_for.desc())
                     .limit(1)
                 )
@@ -354,7 +354,7 @@ def build_router(
                 else:
                     next_slot = now
 
-                item = ShortsQueue(url=url, status=ShortsQueueStatus.pending_confirmation, scheduled_for=next_slot)
+                item = ShortsQueue(url=url, status=ShortsQueueStatus.confirm, scheduled_for=next_slot)
                 session.add(item)
                 await session.flush()
                 item_id = item.id
@@ -480,7 +480,7 @@ def build_router(
                     return
                 item.movie_title = title
                 item.movie_year = year
-                item.status = ShortsQueueStatus.pending_confirmation
+                item.status = ShortsQueueStatus.confirm
                 item.error_message = None
 
             # Re-identify with manual title + show confirmation
@@ -534,7 +534,7 @@ def build_router(
         async with session_factory() as session:
             async with session.begin():
                 now = datetime.now(settings.zoneinfo)
-                item = ShortsQueue(url=url, status=ShortsQueueStatus.pending_confirmation, scheduled_for=now)
+                item = ShortsQueue(url=url, status=ShortsQueueStatus.confirm, scheduled_for=now)
                 session.add(item)
                 await session.flush()
                 item_id = item.id
@@ -574,7 +574,7 @@ def build_router(
         async with session_factory() as session:
             async with session.begin():
                 item = await session.get(ShortsQueue, item_id)
-                if item is None or item.status != ShortsQueueStatus.pending_confirmation:
+                if item is None or item.status != ShortsQueueStatus.confirm:
                     await bot.send_message(admin_id, "❌ Запись не найдена или уже обработана.")
                     return
                 item.status = ShortsQueueStatus.downloading
@@ -623,7 +623,7 @@ def build_router(
             async with session.begin():
                 item = await session.get(ShortsQueue, item_id)
                 if item:
-                    item.status = ShortsQueueStatus.pending_confirmation
+                    item.status = ShortsQueueStatus.confirm
                     item.movie_title = None
                     item.movie_year = None
                     item.tmdb_id = None
@@ -650,7 +650,7 @@ def build_router(
         async with session_factory() as session:
             result = await session.execute(
                 select(ShortsQueue)
-                .where(ShortsQueue.status.in_([ShortsQueueStatus.pending, ShortsQueueStatus.failed, ShortsQueueStatus.pending_confirmation]))
+                .where(ShortsQueue.status.in_([ShortsQueueStatus.pending, ShortsQueueStatus.failed, ShortsQueueStatus.confirm]))
                 .order_by(ShortsQueue.id.desc())
                 .limit(20)
             )
@@ -716,7 +716,7 @@ def build_router(
             async with session_factory() as session:
                 async with session.begin():
                     item = await session.get(ShortsQueue, item_id)
-                    if item is None or item.status not in (ShortsQueueStatus.pending, ShortsQueueStatus.failed, ShortsQueueStatus.pending_confirmation):
+                    if item is None or item.status not in (ShortsQueueStatus.pending, ShortsQueueStatus.failed, ShortsQueueStatus.confirm):
                         await bot.send_message(admin_id, "❌ Запись не найдена или уже обрабатывается.")
                         return
                     item.status = ShortsQueueStatus.downloading
@@ -760,7 +760,7 @@ def build_router(
             async with session.begin():
                 result = await session.execute(
                     delete(ShortsQueue)
-                    .where(ShortsQueue.status.in_([ShortsQueueStatus.pending, ShortsQueueStatus.failed, ShortsQueueStatus.pending_confirmation]))
+                    .where(ShortsQueue.status.in_([ShortsQueueStatus.pending, ShortsQueueStatus.failed, ShortsQueueStatus.confirm]))
                 )
                 deleted_count = result.rowcount
 

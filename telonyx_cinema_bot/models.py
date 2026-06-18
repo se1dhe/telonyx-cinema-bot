@@ -215,7 +215,7 @@ class EditorialControl(Base):
 
 class ShortsQueueStatus(str, enum.Enum):
     pending = "pending"
-    pending_confirmation = "pending_confirmation"
+    confirm = "confirm"
     downloading = "downloading"
     rendering = "rendering"
     ready = "ready"
