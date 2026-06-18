@@ -153,10 +153,33 @@ else:
             content = content.replace(old, new)
             patches += 1
 
+# --- Patch 5: skip the HEAD request to tiktok.com that fails with 400 due to full cookie jar ---
+old_5 = (
+    '\t# publish video\n'
+    '\turl = "https://www.tiktok.com"\n'
+    '\theaders = {\n'
+    '\t\t"user-agent": user_agent\n'
+    '\t}\n\n'
+    '\tr = session.head(url, headers=headers)\n'
+    '\tif not assert_success(url, r):\n'
+    '\t\treturn False'
+)
+new_5 = (
+    '\t# publish video\n'
+    '\t# HEAD check skipped — loads all cookies now, triggers 400\n'
+    '\t# Session already validated by earlier steps\n'
+    '\tpass'
+)
+if old_5 in content:
+    content = content.replace(old_5, new_5)
+    patches += 1
+else:
+    print("WARNING: patch 5 (skip HEAD) pattern not found")
+
 with open(TIKTOK_PY, "w") as f:
     f.write(content)
 
 print(f"Patched tiktok.py — {patches} patches applied")
-if patches < 4:
-    print("WARNING: expected at least 4 patches")
+if patches < 5:
+    print("WARNING: expected at least 5 patches")
     sys.exit(1)
