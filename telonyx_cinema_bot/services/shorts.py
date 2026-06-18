@@ -258,25 +258,45 @@ async def process_shorts_item(
                 except Exception:
                     logger.exception("Failed to download poster")
 
+            # Short caption for photo (Telegram limit 1024)
+            short_caption = f"<b>{card_movie.title}</b>"
+            if card_movie.release_year:
+                short_caption += f"\n📅 {card_movie.release_year}"
+            if card_movie.genres:
+                short_caption += f"  🎭 {', '.join(card_movie.genres)}"
+            if card_movie.imdb_rating:
+                short_caption += f"\n⭐️ {card_movie.imdb_rating}/10"
+            if card_movie.overview:
+                ov = card_movie.overview
+                short_caption += f"\n\n{ov[:180]}..." if len(ov) > 180 else f"\n\n{ov}"
+
             if poster_path:
                 from aiogram.types import FSInputFile
 
-                caption = card_text[:1021] + "..." if len(card_text) > 1024 else card_text
                 msg = await bot.send_photo(
                     settings.telegram_channel_id,
                     photo=FSInputFile(str(poster_path)),
-                    caption=caption,
+                    caption=short_caption,
                     parse_mode="HTML",
                 )
                 item.telegram_file_id = msg.photo[-1].file_id if msg.photo else None
             else:
                 msg = await bot.send_message(
                     settings.telegram_channel_id,
-                    text=card_text,
+                    text=short_caption,
                     parse_mode="HTML",
                     disable_web_page_preview=True,
                 )
                 item.telegram_file_id = None
+
+            # Send full card text as separate message if it contains more than short caption
+            if len(card_text) > len(short_caption):
+                await bot.send_message(
+                    settings.telegram_channel_id,
+                    text=card_text,
+                    parse_mode="HTML",
+                    disable_web_page_preview=True,
+                )
 
             telegram_url = msg.get_url()
         else:
