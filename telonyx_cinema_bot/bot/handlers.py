@@ -330,6 +330,8 @@ def build_router(
             return
 
         admin_id = message.from_user.id
+
+        # 1. Create item in its own transaction
         async with session_factory() as session:
             async with session.begin():
                 from sqlalchemy import select
@@ -359,24 +361,30 @@ def build_router(
                 await session.flush()
                 item_id = item.id
 
-            # Identify immediately so admin can confirm
-            from telonyx_cinema_bot.services.shorts import identify_shorts_movie
-            await identify_shorts_movie(item_id, session, bot, settings, copywriter, target_admin_id=admin_id)
+        # 2. Identify in a fresh session/transaction
+        from telonyx_cinema_bot.services.shorts import identify_shorts_movie
+        async with session_factory() as session:
+            async with session.begin():
+                await identify_shorts_movie(item_id, session, bot, settings, copywriter, target_admin_id=admin_id)
+
+        # 3. Load identified item and send confirmation (Telegram IO outside DB tx)
+        async with session_factory() as session:
+            item = await session.get(ShortsQueue, item_id)
+            confirm_kb = InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [InlineKeyboardButton(text="✅ Да, обрабатывай", callback_data=f"shorts:confirm:yes:{item_id}")],
+                    [InlineKeyboardButton(text="❌ Нет, указать ручками", callback_data=f"shorts:confirm:no:{item_id}")],
+                ]
+            )
+            msg = await message.answer(
+                f"🎬 Определил: <b>{item.movie_title or '?'}</b> ({item.movie_year or 'N/A'})\n\n"
+                f"Правильно?",
+                parse_mode=ParseMode.HTML,
+                reply_markup=confirm_kb,
+            )
 
             async with session.begin():
                 item = await session.get(ShortsQueue, item_id)
-                confirm_kb = InlineKeyboardMarkup(
-                    inline_keyboard=[
-                        [InlineKeyboardButton(text="✅ Да, обрабатывай", callback_data=f"shorts:confirm:yes:{item_id}")],
-                        [InlineKeyboardButton(text="❌ Нет, указать ручками", callback_data=f"shorts:confirm:no:{item_id}")],
-                    ]
-                )
-                msg = await message.answer(
-                    f"🎬 Определил: <b>{item.movie_title or '?'}</b> ({item.movie_year or 'N/A'})\n\n"
-                    f"Правильно?",
-                    parse_mode=ParseMode.HTML,
-                    reply_markup=confirm_kb,
-                )
                 item.admin_msg_id = msg.message_id
 
         await state.clear()
@@ -472,6 +480,7 @@ def build_router(
         year = year_raw if year_raw != "0" else ""
         await state.clear()
 
+        # 1. Update item with manual title in its own transaction
         async with session_factory() as session:
             async with session.begin():
                 item = await session.get(ShortsQueue, item_id)
@@ -483,25 +492,28 @@ def build_router(
                 item.status = ShortsQueueStatus.confirm
                 item.error_message = None
 
-            # Re-identify with manual title + show confirmation
-            from telonyx_cinema_bot.services.shorts import identify_shorts_movie
-            admin_id = message.from_user.id
-            await identify_shorts_movie(item_id, session, bot, settings, copywriter, target_admin_id=admin_id)
-
+        # 2. Re-identify with manual title in fresh session
+        from telonyx_cinema_bot.services.shorts import identify_shorts_movie
+        admin_id = message.from_user.id
+        async with session_factory() as session:
             async with session.begin():
-                item = await session.get(ShortsQueue, item_id)
-                confirm_kb = InlineKeyboardMarkup(
-                    inline_keyboard=[
-                        [InlineKeyboardButton(text="✅ Да, обрабатывай", callback_data=f"shorts:confirm:yes:{item_id}")],
-                        [InlineKeyboardButton(text="❌ Нет, указать ручками", callback_data=f"shorts:confirm:no:{item_id}")],
-                    ]
-                )
-                await message.answer(
-                    f"🎬 Определил: <b>{item.movie_title or '?'}</b> ({item.movie_year or 'N/A'})\n\n"
-                    f"Правильно?",
-                    parse_mode=ParseMode.HTML,
-                    reply_markup=confirm_kb,
-                )
+                await identify_shorts_movie(item_id, session, bot, settings, copywriter, target_admin_id=admin_id)
+
+        # 3. Send confirmation (Telegram IO outside DB tx)
+        async with session_factory() as session:
+            item = await session.get(ShortsQueue, item_id)
+            confirm_kb = InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [InlineKeyboardButton(text="✅ Да, обрабатывай", callback_data=f"shorts:confirm:yes:{item_id}")],
+                    [InlineKeyboardButton(text="❌ Нет, указать ручками", callback_data=f"shorts:confirm:no:{item_id}")],
+                ]
+            )
+            await message.answer(
+                f"🎬 Определил: <b>{item.movie_title or '?'}</b> ({item.movie_year or 'N/A'})\n\n"
+                f"Правильно?",
+                parse_mode=ParseMode.HTML,
+                reply_markup=confirm_kb,
+            )
 
     @router.callback_query(F.data == "shorts:next_video")
     async def cb_shorts_next_video(callback: CallbackQuery, state: FSMContext) -> None:
@@ -531,6 +543,7 @@ def build_router(
         from datetime import datetime
         admin_id = message.from_user.id
 
+        # 1. Create item in its own transaction
         async with session_factory() as session:
             async with session.begin():
                 now = datetime.now(settings.zoneinfo)
@@ -539,23 +552,30 @@ def build_router(
                 await session.flush()
                 item_id = item.id
 
-            from telonyx_cinema_bot.services.shorts import identify_shorts_movie
-            await identify_shorts_movie(item_id, session, bot, settings, copywriter, target_admin_id=admin_id)
+        # 2. Identify in fresh session/transaction
+        from telonyx_cinema_bot.services.shorts import identify_shorts_movie
+        async with session_factory() as session:
+            async with session.begin():
+                await identify_shorts_movie(item_id, session, bot, settings, copywriter, target_admin_id=admin_id)
+
+        # 3. Load item and send confirmation (Telegram IO outside DB tx)
+        async with session_factory() as session:
+            item = await session.get(ShortsQueue, item_id)
+            confirm_kb = InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [InlineKeyboardButton(text="✅ Да, обрабатывай", callback_data=f"shorts:confirm:yes:{item_id}")],
+                    [InlineKeyboardButton(text="❌ Нет, указать ручками", callback_data=f"shorts:confirm:no:{item_id}")],
+                ]
+            )
+            msg = await message.answer(
+                f"🎬 Определил: <b>{item.movie_title or '?'}</b> ({item.movie_year or 'N/A'})\n\n"
+                f"Правильно?",
+                parse_mode=ParseMode.HTML,
+                reply_markup=confirm_kb,
+            )
 
             async with session.begin():
                 item = await session.get(ShortsQueue, item_id)
-                confirm_kb = InlineKeyboardMarkup(
-                    inline_keyboard=[
-                        [InlineKeyboardButton(text="✅ Да, обрабатывай", callback_data=f"shorts:confirm:yes:{item_id}")],
-                        [InlineKeyboardButton(text="❌ Нет, указать ручками", callback_data=f"shorts:confirm:no:{item_id}")],
-                    ]
-                )
-                msg = await message.answer(
-                    f"🎬 Определил: <b>{item.movie_title or '?'}</b> ({item.movie_year or 'N/A'})\n\n"
-                    f"Правильно?",
-                    parse_mode=ParseMode.HTML,
-                    reply_markup=confirm_kb,
-                )
                 item.admin_msg_id = msg.message_id
 
         await state.clear()
