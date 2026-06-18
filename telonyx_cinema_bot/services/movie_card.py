@@ -44,8 +44,8 @@ def format_movie_card(movie: MovieMetadata) -> str:
     return "\n".join(lines)
 
 
-def generate_tiktok_caption(movie: MovieMetadata | None, telegram_url: str) -> str:
-    title_line = movie.display_title if movie else "Новинка кино"
+def generate_tiktok_caption(movie: MovieMetadata | None, telegram_url: str, *, fallback_title: str = "Новинка кино") -> str:
+    title_line = movie.display_title if movie else fallback_title
     pitch = "Разборы, интересные факты и подборки на вечер — в нашем Telegram 👇"
 
     hashtags: list[str] = []

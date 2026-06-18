@@ -156,31 +156,32 @@ async def process_shorts_item(
                 item.movie_year = ai_year or ""
                 item.movie_genre = ""
 
-            if not movie and settings.admin_user_ids:
-                from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+            if not movie and not item.movie_title:
+                # No title at all — stop and ask admin
+                if settings.admin_user_ids:
+                    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-                admin_id = settings.admin_user_ids[0]
-                kb = InlineKeyboardMarkup(
-                    inline_keyboard=[[
-                        InlineKeyboardButton(
-                            text="🎬 Указать фильм",
-                            callback_data=f"shorts:identify:{item_id}",
-                        )
-                    ]]
-                )
-                await bot.send_message(
-                    admin_id,
-                    f"⚠️ Shorts #{item_id}: не удалось определить фильм.\n"
-                    f"YouTube: {item.url}\n"
-                    f"AI: <b>{ai_title}</b> ({ai_year or '?'})\n\n"
-                    "Укажи фильм вручную — после этого бот загрузит видео в TikTok "
-                    "и опубликует карточку в Telegram.",
-                    parse_mode="HTML",
-                    reply_markup=kb,
-                )
+                    admin_id = settings.admin_user_ids[0]
+                    kb = InlineKeyboardMarkup(
+                        inline_keyboard=[[
+                            InlineKeyboardButton(
+                                text="🎬 Указать фильм",
+                                callback_data=f"shorts:identify:{item_id}",
+                            )
+                        ]]
+                    )
+                    await bot.send_message(
+                        admin_id,
+                        f"⚠️ Shorts #{item_id}: не удалось определить фильм.\n"
+                        f"YouTube: {item.url}\n"
+                        f"AI: <b>{ai_title}</b> ({ai_year or '?'})\n\n"
+                        "Укажи фильм вручную.",
+                        parse_mode="HTML",
+                        reply_markup=kb,
+                    )
                 item.status = ShortsQueueStatus.failed
                 item.error_message = "Фильм не определён"
-                return  # Stop — don't render, don't upload TikTok
+                return
 
         item.status = ShortsQueueStatus.rendering
         await session.flush()
@@ -255,7 +256,7 @@ async def process_shorts_item(
         telegram_url = msg.get_url()
 
         # 2. TikTok caption with movie title + Telegram pitch + viral hashtags
-        tiktok_caption = generate_tiktok_caption(card_movie, telegram_url)
+        tiktok_caption = generate_tiktok_caption(card_movie, telegram_url, fallback_title=item.movie_title or "Фильм")
 
         # 3. Upload to TikTok
         if settings.tiktok_account_name:

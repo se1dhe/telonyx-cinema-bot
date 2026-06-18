@@ -44,11 +44,26 @@ class TMDbClient:
         self.base_url = "https://api.themoviedb.org/3"
 
     async def search_best_match(self, title: str, year: str | None = None) -> MovieMetadata | None:
+        strategies = [
+            {"language": "ru-RU", "year": year},
+            {"language": "ru-RU"},
+            {"language": "en-US", "year": year},
+            {"language": "en-US"},
+        ]
+        for params in strategies:
+            movie = await self._search_single(title, **params)
+            if movie:
+                return movie
+        return None
+
+    async def _search_single(
+        self, title: str, *, language: str = "ru-RU", year: str | None = None,
+    ) -> MovieMetadata | None:
         async with aiohttp.ClientSession() as session:
             params: dict[str, str] = {
                 "query": title,
                 "include_adult": "false",
-                "language": "ru-RU",
+                "language": language,
             }
             if year:
                 params["year"] = year
