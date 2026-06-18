@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     yt_dlp_cookies_base64: str | None = Field(default=None, alias="YT_DLP_COOKIES_BASE64")
     yt_dlp_cookies_file: str | None = Field(default=None, alias="YT_DLP_COOKIES_FILE")
     omdb_api_key: str | None = Field(default=None, alias="OMDB_API_KEY")
+    tiktok_draft_only: bool = Field(default=False, alias="TIKTOK_DRAFT_ONLY")
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore", populate_by_name=True)
 

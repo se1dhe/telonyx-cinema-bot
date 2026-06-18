@@ -71,6 +71,7 @@ async def upload_to_tiktok(
     title: str,
     account_name: str,
     storage_dir: Path,
+    draft: bool = False,
 ) -> bool:
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(
@@ -80,6 +81,7 @@ async def upload_to_tiktok(
         title,
         account_name,
         storage_dir,
+        draft,
     )
 
 
@@ -88,6 +90,7 @@ def _sync_upload(
     title: str,
     account_name: str,
     storage_dir: Path,
+    draft: bool = False,
 ) -> bool:
     import io
     from contextlib import redirect_stdout
@@ -123,7 +126,7 @@ def _sync_upload(
                 allow_comment=1,
                 allow_duet=0,
                 allow_stitch=0,
-                visibility_type=0,
+                visibility_type=1 if draft else 0,
                 brand_organic_type=0,
                 branded_content_type=0,
                 ai_label=0,

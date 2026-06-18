@@ -275,6 +275,7 @@ async def process_shorts_item(
                 title=tiktok_caption,
                 account_name=settings.tiktok_account_name,
                 storage_dir=storage_dir,
+                draft=settings.tiktok_draft_only,
             )
             if tiktok_ok:
                 logger.info("TikTok upload complete")
