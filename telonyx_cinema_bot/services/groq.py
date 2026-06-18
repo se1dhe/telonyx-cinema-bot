@@ -5,7 +5,7 @@ import re
 
 from openai import AsyncOpenAI, RateLimitError
 
-from telonyx_cinema_bot.services.gemini import FallbackCopywriter, _parse_campaign_texts, _parse_key_value_block, _parse_tags
+from telonyx_cinema_bot.services.gemini import FallbackCopywriter, _parse_campaign_texts, _parse_key_value_block, _parse_tags, _parse_title_year
 from telonyx_cinema_bot.services.tmdb import MovieMetadata
 
 logger = logging.getLogger(__name__)
@@ -80,18 +80,22 @@ class GroqCopywriter:
             self._log_generation_error("fact", exc)
             return await self.fallback.generate_fact(movie)
 
-    async def identify_movie_from_title(self, raw_title: str) -> str:
+    async def identify_movie_from_title(self, raw_title: str) -> tuple[str, str]:
         prompt = (
-            "Ты — эксперт по кино. Определи, какой фильм или сериал имеется в виду "
-            "по заголовку YouTube-видео. Верни ТОЛЬКО официальное русское название фильма/сериала. "
-            "Если не уверен — верни оригинальный заголовок как есть.\n\n"
+            "Ты — эксперт по кино. По заголовку YouTube-видео определи "
+            "название фильма/сериала и год выхода.\n"
+            "Верни строго в формате: НАЗВАНИЕ | ГОД\n"
+            "Пример: Бойцовский клуб | 1999\n\n"
+            "Если год неопределим — поставь 0.\n"
+            "Если название неясно — верни оригинальный заголовок.\n\n"
             f"Заголовок: {raw_title}"
         )
         try:
-            return await self._generate_text(prompt)
+            text = await self._generate_text(prompt)
+            return _parse_title_year(text, raw_title)
         except Exception as exc:
             self._log_generation_error("movie identification", exc)
-            return raw_title
+            return raw_title, ""
 
     async def generate_shorts_description(
         self,

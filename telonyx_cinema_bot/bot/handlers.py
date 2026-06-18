@@ -24,6 +24,8 @@ class ManualPostStates(StatesGroup):
 
 class AddShortsStates(StatesGroup):
     waiting_for_url = State()
+    waiting_for_movie_title = State()
+    waiting_for_movie_year = State()
 
 
 def _main_menu() -> InlineKeyboardMarkup:
@@ -423,6 +425,65 @@ def build_router(
                 f"🔄 Shorts #{item_id} поставлен в очередь на повторную обработку.",
             )
         await callback.answer()
+
+    @router.callback_query(F.data.startswith("shorts:identify:"))
+    async def cb_shorts_identify(callback: CallbackQuery, state: FSMContext) -> None:
+        if not _is_admin_cb(callback):
+            await callback.answer("Только для администраторов.", show_alert=True)
+            return
+
+        item_id = int(callback.data.split(":")[2])
+        await state.update_data(shorts_item_id=item_id)
+        await state.set_state(AddShortsStates.waiting_for_movie_title)
+        await callback.message.answer(
+            f"🎬 Shorts #{item_id}\n"
+            "Введи <b>название фильма/сериала</b> по-русски:",
+            parse_mode=ParseMode.HTML,
+        )
+        await callback.answer()
+
+    @router.message(StateFilter(AddShortsStates.waiting_for_movie_title))
+    async def fsm_receive_movie_title(message: Message, state: FSMContext) -> None:
+        if not _is_admin_msg(message):
+            return
+        title = (message.text or "").strip()
+        if not title:
+            await message.answer("Название не может быть пустым. Попробуй ещё раз:")
+            return
+        await state.update_data(movie_title=title)
+        await state.set_state(AddShortsStates.waiting_for_movie_year)
+        await message.answer("Теперь введи <b>год выпуска</b> (или 0, если не знаешь):", parse_mode=ParseMode.HTML)
+
+    @router.message(StateFilter(AddShortsStates.waiting_for_movie_year))
+    async def fsm_receive_movie_year(message: Message, state: FSMContext) -> None:
+        if not _is_admin_msg(message):
+            return
+        year_raw = (message.text or "").strip()
+        if not year_raw.isdigit():
+            await message.answer("Год должен быть числом. Попробуй ещё раз:")
+            return
+        data = await state.get_data()
+        item_id = data.get("shorts_item_id")
+        title = data.get("movie_title", "")
+        year = year_raw if year_raw != "0" else ""
+        await state.clear()
+
+        async with session_factory() as session:
+            async with session.begin():
+                item = await session.get(ShortsQueue, item_id)
+                if item is None:
+                    await message.answer(f"❌ Shorts #{item_id} не найден в базе.")
+                    return
+                item.movie_title = title
+                item.movie_year = year
+                item.status = ShortsQueueStatus.pending
+                item.error_message = None
+
+        await message.answer(
+            f"✅ Shorts #{item_id}: <b>{title}</b> ({year or 'год неизвестен'})\n"
+            "Поставлен в очередь на повторную обработку.",
+            parse_mode=ParseMode.HTML,
+        )
 
     @router.callback_query(F.data == "shorts:queue")
     async def cb_shorts_queue(callback: CallbackQuery) -> None:

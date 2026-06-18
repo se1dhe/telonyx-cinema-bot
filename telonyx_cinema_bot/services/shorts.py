@@ -137,9 +137,9 @@ async def process_shorts_item(
         if not item.movie_title:
             raw_meta = await extract_yt_metadata(item.url, settings.yt_dlp_bin, cookies=cookies_path)
             raw_title = (raw_meta or {}).get("title", "") or ""
-            ai_title = await copywriter.identify_movie_from_title(raw_title)
+            ai_title, ai_year = await copywriter.identify_movie_from_title(raw_title)
             tmdb = TMDbClient(settings.tmdb_api_key)
-            movie = await tmdb.search_best_match(ai_title)
+            movie = await tmdb.search_best_match(ai_title, year=ai_year)
             if movie:
                 item.movie_title = movie.title
                 item.movie_year = str(movie.release_year or "")
@@ -147,9 +147,32 @@ async def process_shorts_item(
                 item.tmdb_id = movie.tmdb_id
             else:
                 item.movie_title = ai_title
-                item.movie_year = ""
+                item.movie_year = ai_year or ""
                 item.movie_genre = ""
             item.yt_raw_title = raw_title
+
+            if not movie and settings.admin_user_ids:
+                from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+                admin_id = settings.admin_user_ids[0]
+                kb = InlineKeyboardMarkup(
+                    inline_keyboard=[[
+                        InlineKeyboardButton(
+                            text="🎬 Указать фильм",
+                            callback_data=f"shorts:identify:{item_id}",
+                        )
+                    ]]
+                )
+                await bot.send_message(
+                    admin_id,
+                    f"⚠️ Shorts #{item_id}: не удалось определить фильм по TMDb.\n"
+                    f"YouTube: {item.url}\n"
+                    f"AI определил: <b>{ai_title}</b> ({ai_year or '?'})\n\n"
+                    "Видео будет загружено в TikTok, но карточка фильма в Telegram "
+                    "не опубликована. Укажи фильм вручную.",
+                    parse_mode="HTML",
+                    reply_markup=kb,
+                )
 
         item.status = ShortsQueueStatus.rendering
         await session.flush()
@@ -186,17 +209,63 @@ async def process_shorts_item(
             else:
                 logger.warning("TikTok upload failed, continuing to Telegram")
 
-        from aiogram.types import FSInputFile
+        from telonyx_cinema_bot.services.movie_card import format_movie_card
+        from telonyx_cinema_bot.services.tmdb import MovieMetadata
 
-        msg = await bot.send_video(
-            settings.telegram_channel_id,
-            video=FSInputFile(str(output_path)),
-            caption=description,
-            parse_mode="HTML",
-            supports_streaming=True,
+        # Get full movie metadata for the card
+        card_movie: MovieMetadata | None = None
+        if item.tmdb_id:
+            try:
+                tmdb = TMDbClient(settings.tmdb_api_key)
+                card_movie = await tmdb.fetch_movie(item.tmdb_id)
+            except Exception:
+                logger.exception("Failed to fetch movie metadata for card")
+        elif item.movie_title:
+            try:
+                tmdb = TMDbClient(settings.tmdb_api_key)
+                card_movie = await tmdb.search_best_match(item.movie_title)
+            except Exception:
+                logger.exception("Failed to search movie for card")
+
+        card_text = format_movie_card(card_movie) if card_movie else (
+            f"<b>{item.movie_title or 'Фильм'}</b>"
         )
 
-        item.telegram_file_id = msg.video.file_id
+        # Download poster
+        poster_path: Path | None = None
+        poster_url = card_movie.poster_url if card_movie else None
+        if poster_url:
+            try:
+                import aiohttp
+
+                async with aiohttp.ClientSession() as s:
+                    async with s.get(poster_url) as resp:
+                        if resp.status == 200:
+                            data = await resp.read()
+                            poster_path = work_dir / "poster.jpg"
+                            poster_path.write_bytes(data)
+            except Exception:
+                logger.exception("Failed to download poster")
+
+        if poster_path:
+            from aiogram.types import FSInputFile
+
+            msg = await bot.send_photo(
+                settings.telegram_channel_id,
+                photo=FSInputFile(str(poster_path)),
+                caption=card_text,
+                parse_mode="HTML",
+            )
+            item.telegram_file_id = msg.photo[-1].file_id if msg.photo else None
+        else:
+            msg = await bot.send_message(
+                settings.telegram_channel_id,
+                text=card_text,
+                parse_mode="HTML",
+                disable_web_page_preview=True,
+            )
+            item.telegram_file_id = None
+
         item.video_path = str(output_path)
         item.status = ShortsQueueStatus.published
         item.published_at = datetime.now(timezone.utc)
@@ -207,15 +276,12 @@ async def process_shorts_item(
             await bot.edit_message_text(
                 chat_id=settings.admin_user_ids[0] if settings.admin_user_ids else 0,
                 message_id=item.admin_msg_id,
-                text=f"✅ Опубликовано: {item.movie_title}\n{msg.get_url()}",
+                text=f"✅ Опубликовано: {item.movie_title or '?'}\n{msg.get_url()}",
                 reply_markup=InlineKeyboardMarkup(
                     inline_keyboard=[[InlineKeyboardButton(text="📺 Посмотреть", url=msg.get_url())]]
                 ),
                 disable_web_page_preview=True,
             )
-
-        if item.movie_title and item.tmdb_id:
-            await _enqueue_movie_fact(item, session, settings, copywriter)
 
     except Exception as exc:
         logger.exception("Failed to process shorts item %s", item_id)
@@ -226,11 +292,14 @@ async def process_shorts_item(
             from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
             admin_id = settings.admin_user_ids[0]
-            kb = InlineKeyboardMarkup(
-                inline_keyboard=[
-                    [InlineKeyboardButton(text="🔄 Заменить видео", callback_data=f"shorts:retry:{item_id}")],
-                ]
-            )
+            buttons = [
+                [InlineKeyboardButton(text="🔄 Повторить", callback_data=f"shorts:retry:{item_id}")],
+            ]
+            if not item.tmdb_id and item.movie_title:
+                buttons.insert(0, [
+                    InlineKeyboardButton(text="🎬 Указать фильм", callback_data=f"shorts:identify:{item_id}")
+                ])
+            kb = InlineKeyboardMarkup(inline_keyboard=buttons)
             text = (
                 f"❌ Ошибка обработки Shorts #{item_id}\n"
                 f"URL: {item.url}\n"
@@ -246,52 +315,4 @@ async def process_shorts_item(
         await session.commit()
 
 
-async def _enqueue_movie_fact(
-    item: ShortsQueue,
-    session: Any,
-    settings: Settings,
-    copywriter: GeminiCopywriter,
-) -> None:
-    from telonyx_cinema_bot.models import EditorialPostType
-    from telonyx_cinema_bot.services.editorial import EditorialService
-    from telonyx_cinema_bot.services.tmdb import MovieMetadata
 
-    try:
-        movie = MovieMetadata(
-            tmdb_id=item.tmdb_id or 0,
-            title=item.movie_title or "",
-            original_title="",
-            release_year=int(item.movie_year) if item.movie_year and item.movie_year.isdigit() else None,
-            overview="",
-            poster_path="",
-            imdb_id="",
-            imdb_rating="",
-            genres=[item.movie_genre] if item.movie_genre else [],
-            similar_movies=[],
-            raw_metadata={},
-        )
-
-        if item.tmdb_id:
-            from telonyx_cinema_bot.models import Film
-
-            film = await session.get(Film, item.tmdb_id)
-            if film and film.poster_path:
-                movie.poster_path = film.poster_path
-
-        fact_text = await copywriter.generate_fact(movie)
-        if not fact_text:
-            return
-
-        editorial = EditorialService(session, settings, copywriter)
-        await editorial.enqueue_post(
-            post_type=EditorialPostType.discussion,
-            title=f"🎬 Факт о фильме: {item.movie_title}",
-            text=f"<b>{item.movie_title}</b>\n\n{fact_text}",
-            hashtags=["#кино", "#интересныйфакт", "#кинофакт"],
-            image_url=movie.poster_url,
-            metadata={"tmdb_id": item.tmdb_id, "source": "shorts", "shorts_item_id": item.id},
-            scheduled_for=None,
-        )
-        logger.info("Enqueued fact post for %s", item.movie_title)
-    except Exception:
-        logger.exception("Failed to enqueue movie fact for %s", item.movie_title)

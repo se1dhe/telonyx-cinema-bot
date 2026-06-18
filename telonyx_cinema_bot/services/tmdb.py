@@ -20,6 +20,8 @@ class MovieMetadata:
     imdb_id: str | None
     imdb_rating: str | None
     genres: list[str]
+    director: str | None
+    cast: list[dict[str, str]]
     similar_movies: list[dict[str, Any]]
     raw_metadata: dict[str, Any]
 
@@ -41,13 +43,16 @@ class TMDbClient:
         self.api_key = api_key
         self.base_url = "https://api.themoviedb.org/3"
 
-    async def search_best_match(self, title: str) -> MovieMetadata | None:
+    async def search_best_match(self, title: str, year: str | None = None) -> MovieMetadata | None:
         async with aiohttp.ClientSession() as session:
-            search_payload = await self._get(
-                session,
-                "/search/movie",
-                {"query": title, "include_adult": "false", "language": "ru-RU"},
-            )
+            params: dict[str, str] = {
+                "query": title,
+                "include_adult": "false",
+                "language": "ru-RU",
+            }
+            if year:
+                params["year"] = year
+            search_payload = await self._get(session, "/search/movie", params)
             results = search_payload.get("results", [])
             if not results:
                 return None
@@ -64,7 +69,7 @@ class TMDbClient:
         payload = await self._get(
             session,
             f"/movie/{tmdb_id}",
-            {"append_to_response": "external_ids,similar", "language": "ru-RU"},
+            {"append_to_response": "external_ids,similar,credits", "language": "ru-RU"},
         )
         return normalize_movie(payload)
 
@@ -80,6 +85,19 @@ class TMDbClient:
 def normalize_movie(payload: dict[str, Any]) -> MovieMetadata:
     release_year = _extract_year(payload.get("release_date"))
     genres = [genre["name"] for genre in payload.get("genres", []) if genre.get("name")]
+
+    credits = payload.get("credits", {})
+    crew = credits.get("crew", [])
+    director = next(
+        (m["name"] for m in crew if m.get("job") == "Director"),
+        None,
+    )
+    cast_list = [
+        {"name": m.get("name", ""), "character": m.get("character", "")}
+        for m in credits.get("cast", [])
+        if m.get("name")
+    ][:5]
+
     similar = [
         {
             "tmdb_id": item.get("id"),
@@ -102,6 +120,8 @@ def normalize_movie(payload: dict[str, Any]) -> MovieMetadata:
         imdb_id=payload.get("external_ids", {}).get("imdb_id"),
         imdb_rating=_extract_imdb_rating(payload),
         genres=genres,
+        director=director,
+        cast=cast_list,
         similar_movies=similar,
         raw_metadata=payload,
     )

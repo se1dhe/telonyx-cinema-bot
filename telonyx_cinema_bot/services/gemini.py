@@ -81,18 +81,22 @@ class GeminiCopywriter:
             return await self.fallback.generate_fact(movie)
 
 
-    async def identify_movie_from_title(self, raw_title: str) -> str:
+    async def identify_movie_from_title(self, raw_title: str) -> tuple[str, str]:
         prompt = (
-            "Ты — эксперт по кино. Определи, какой фильм или сериал имеется в виду "
-            "по заголовку YouTube-видео. Верни ТОЛЬКО официальное русское название фильма/сериала. "
-            "Если не уверен — верни оригинальный заголовок как есть.\n\n"
+            "Ты — эксперт по кино. По заголовку YouTube-видео определи "
+            "название фильма/сериала и год выхода.\n"
+            "Верни строго в формате: НАЗВАНИЕ | ГОД\n"
+            "Пример: Бойцовский клуб | 1999\n\n"
+            "Если год неопределим — поставь 0.\n"
+            "Если название неясно — верни оригинальный заголовок.\n\n"
             f"Заголовок: {raw_title}"
         )
         try:
-            return await self._generate_text(prompt)
+            text = await self._generate_text(prompt)
+            return _parse_title_year(text, raw_title)
         except Exception as exc:
             self._log_generation_error("movie identification", exc)
-            return raw_title
+            return raw_title, ""
 
     async def generate_shorts_description(
         self,
@@ -348,8 +352,8 @@ class FallbackCopywriter:
     async def generate_fact(self, movie: MovieMetadata) -> str:
         return f"Погрузитесь в атмосферу фильма {movie.title}."
 
-    async def identify_movie_from_title(self, raw_title: str) -> str:
-        return raw_title
+    async def identify_movie_from_title(self, raw_title: str) -> tuple[str, str]:
+        return raw_title, ""
 
     async def generate_shorts_description(
         self,
@@ -444,3 +448,15 @@ def _parse_tags(text: str) -> list[str]:
             token = f"#{token}"
         tags.append(token.replace(" ", ""))
     return list(dict.fromkeys(tags))
+
+
+def _parse_title_year(text: str, fallback_title: str) -> tuple[str, str]:
+    text = text.strip().strip('"').strip("'")
+    if "|" in text:
+        parts = text.rsplit("|", 1)
+        title = parts[0].strip()
+        year = parts[1].strip()
+        if year == "0":
+            year = ""
+        return title, year
+    return text, ""
