@@ -343,6 +343,24 @@ class GeminiCopywriter:
             self._log_generation_error("discussion post", exc)
             return await self.fallback.generate_discussion_post(movie)
 
+    async def compress_card_text(self, full_text: str) -> str:
+        """Compress movie card to fit Telegram caption limit via AI. Falls back to hard truncate."""
+        prompt = (
+            "Сожми этот текст карточки фильма до 900 символов максимум. "
+            "Сохрани все основные факты: название фильма, год, жанр, режиссёр, "
+            "3 главных актёра, рейтинг, краткое описание (до 150 символов), "
+            "и ссылку IMDb. Используй HTML теги <b> для выделения названий. "
+            "Результат должен быть готов к публикации в Telegram caption. "
+            "Только результат, без пояснений.\n\n"
+            f"Текст:\n{full_text}"
+        )
+        try:
+            text = await self._generate_text(prompt)
+            return text.strip()
+        except Exception as exc:
+            self._log_generation_error("card compression", exc)
+            return await self.fallback.compress_card_text(full_text)
+
 
 class FallbackCopywriter:
     async def generate_campaign_texts(self, movie: MovieMetadata) -> tuple[str, str, str]:
@@ -420,6 +438,22 @@ class FallbackCopywriter:
             "options": ["Классика", "Премьера", "Авторское кино"],
             "hashtags": ["#опрос", "#кино", "#telonyxcinema"],
         }
+
+    async def compress_card_text(self, full_text: str) -> str:
+        """Hard truncate with naive HTML safety."""
+        if len(full_text) <= 900:
+            return full_text
+        truncated = full_text[:900]
+        last_close = truncated.rfind("</")
+        if last_close > 0:
+            last_tag_end = truncated.find(">", last_close)
+            if last_tag_end > 0:
+                truncated = truncated[: last_tag_end + 1]
+        elif truncated.count("<") > truncated.count(">"):
+            last_open = truncated.rfind("<")
+            if last_open > 0:
+                truncated = truncated[:last_open]
+        return truncated + "..."
 
 
 def _parse_campaign_texts(text: str) -> tuple[str, str, str] | None:

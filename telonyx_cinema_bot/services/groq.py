@@ -331,3 +331,21 @@ class GroqCopywriter:
         except Exception as exc:
             self._log_generation_error("discussion post", exc)
             return await self.fallback.generate_discussion_post(movie)
+
+    async def compress_card_text(self, full_text: str) -> str:
+        """Compress via Groq. Falls back to hard truncate if AI fails."""
+        prompt = (
+            "Сожми этот текст карточки фильма до 900 символов максимум. "
+            "Сохрани все основные факты: название фильма, год, жанр, режиссёр, "
+            "3 главных актёра, рейтинг, краткое описание (до 150 символов), "
+            "и ссылку IMDb. Используй HTML теги <b> для выделения названий. "
+            "Результат должен быть готов к публикации в Telegram caption. "
+            "Только результат, без пояснений.\n\n"
+            f"Текст:\n{full_text}"
+        )
+        try:
+            text = await self._generate_text(prompt)
+            return text.strip()
+        except Exception as exc:
+            self._log_generation_error("card compression", exc)
+            return await self.fallback.compress_card_text(full_text)
