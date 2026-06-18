@@ -25,7 +25,7 @@ def format_movie_card(movie: MovieMetadata) -> str:
     if movie.cast:
         cast_str = "\n".join(
             f"  👤 <b>{c['name']}</b> — {c['character']}"
-            for c in movie.cast
+            for c in movie.cast[:2]
         )
         lines.append(f"👥 <b>В ролях:</b>\n{cast_str}")
 
@@ -34,7 +34,8 @@ def format_movie_card(movie: MovieMetadata) -> str:
 
     if movie.overview:
         lines.append("")
-        lines.append(movie.overview)
+        ov = movie.overview
+        lines.append(f"{ov[:200]}..." if len(ov) > 200 else ov)
 
     imdb_link = _imdb_url(movie.imdb_id)
     if imdb_link:

@@ -245,10 +245,6 @@ async def process_shorts_item(
 
         if should_post_card:
             card_text = format_movie_card(card_movie)
-            if len(card_text) > 1024:
-                logger.info("Card text is %s chars — compressing for Telegram", len(card_text))
-                card_text = await copywriter.compress_card_text(card_text)
-
             poster_path: Path | None = None
             poster_url = card_movie.poster_url
             if poster_url:
