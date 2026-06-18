@@ -48,12 +48,7 @@ old_2 = (
 )
 new_2 = (
     '\t\tif r.json()["status_code"] == 0:\n'
-    '\t\t\tdata = r.json()\n'
-    '\t\t\titem_id = data.get("item_id", "")\n'
-    '\t\t\tshare_url = data.get("share_url", "") or ""\n'
-    '\t\t\tif not share_url and item_id:\n'
-    '\t\t\t\tshare_url = f"https://www.tiktok.com/@{session_user}/video/{item_id}"\n'
-    '\t\t\tprint(f"Published successfully!  ID={item_id}  URL={share_url}")\n'
+    '\t\t\tprint(f"Published successfully! Full response: {r.json()}")\n'
     '\t\t\tuploaded = True\n'
     '\t\t\tbreak'
 )

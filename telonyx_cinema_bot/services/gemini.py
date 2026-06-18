@@ -96,7 +96,7 @@ class GeminiCopywriter:
             return _parse_title_year(text, raw_title)
         except Exception as exc:
             self._log_generation_error("movie identification", exc)
-            return raw_title, ""
+            return await self.fallback.identify_movie_from_title(raw_title)
 
     async def generate_shorts_description(
         self,
