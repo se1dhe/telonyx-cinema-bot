@@ -89,6 +89,9 @@ def _sync_upload(
     account_name: str,
     storage_dir: Path,
 ) -> bool:
+    import io
+    from contextlib import redirect_stdout
+
     try:
         from tiktok_uploader import tiktok
         from tiktok_uploader.Config import Config
@@ -109,20 +112,27 @@ def _sync_upload(
         if not init_tiktok_session(account_name, storage_dir):
             return False
 
-        ok = tiktok.upload_video(
-            session_user=account_name,
-            video=str(video_path),
-            title=title,
-            schedule_time=0,
-            allow_comment=1,
-            allow_duet=0,
-            allow_stitch=0,
-            visibility_type=0,
-            brand_organic_type=0,
-            branded_content_type=0,
-            ai_label=0,
-            proxy=None,
-        )
+        # Библиотека печатает ответы TikTok в stdout — перехватываем их в лог
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            ok = tiktok.upload_video(
+                session_user=account_name,
+                video=str(video_path),
+                title=title,
+                schedule_time=0,
+                allow_comment=1,
+                allow_duet=0,
+                allow_stitch=0,
+                visibility_type=0,
+                brand_organic_type=0,
+                branded_content_type=0,
+                ai_label=0,
+                proxy=None,
+            )
+        library_output = buf.getvalue()
+        if library_output:
+            # Показываем последние 2kb вывода библиотеки (там обычно статусы и тело ответа)
+            logger.info("TikTok library output:\n%s", library_output.strip()[-2048:])
 
         if ok:
             logger.info("TikTok upload ok for %s", account_name)
