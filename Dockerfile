@@ -37,4 +37,8 @@ ENV PYTHONPATH="/opt/tiktok-autouploader"
 # Layer 4: source code (fast, only this busts on code changes)
 COPY . .
 
+# Patch: load ALL cookies (incl. msToken) into the requests session,
+# not just sessionid + tt-target-idc.
+RUN python scripts/patch_tiktok_library.py
+
 CMD ["python", "-m", "telonyx_cinema_bot"]
