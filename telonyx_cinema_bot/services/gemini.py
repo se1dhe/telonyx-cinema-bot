@@ -118,10 +118,11 @@ class GeminiCopywriter:
             return text.strip()
         except Exception as exc:
             self._log_generation_error("shorts description", exc)
+            tag = movie_title.replace('.', '').replace('#', '').replace(' ', '').lower()
             return (
                 f"{movie_title} | {raw_title} 🔥\n"
-                f"#кино #{movie_title.replace(' ', '').lower()} "
-                f"#shorts #рек #telonyxcinema"
+                f"#кино #{tag} "
+                f"#shorts #рек #telonyx_cinema"
             )
 
     async def generate_recommendations(self, movie: MovieMetadata) -> str:
@@ -357,10 +358,11 @@ class FallbackCopywriter:
         movie_year: str,
         movie_genre: str,
     ) -> str:
+        tag = movie_title.replace('.', '').replace('#', '').replace(' ', '').lower()
         return (
             f"{movie_title} | {raw_title} 🔥\n"
-            f"#кино #{movie_title.replace(' ', '').lower()} "
-            f"#shorts #рек #telonyxcinema"
+            f"#кино #{tag} "
+            f"#shorts #рек #telonyx_cinema"
         )
 
     async def generate_recommendations(self, movie: MovieMetadata) -> str:
