@@ -56,6 +56,19 @@ class TMDbClient:
                 return movie
         return None
 
+    async def find_by_imdb_id(self, imdb_id: str) -> MovieMetadata | None:
+        async with aiohttp.ClientSession() as session:
+            payload = await self._get(
+                session,
+                f"/find/{imdb_id}",
+                {"external_source": "imdb_id", "language": "ru-RU"},
+            )
+            results = payload.get("movie_results", [])
+            if not results:
+                return None
+            tmdb_id = results[0]["id"]
+            return await self.fetch_movie(tmdb_id, session=session)
+
     async def _search_single(
         self, title: str, *, language: str = "ru-RU", year: str | None = None,
     ) -> MovieMetadata | None:

@@ -144,8 +144,20 @@ async def process_shorts_item(
                 ai_title = item.movie_title
                 ai_year = item.movie_year or ""
 
+            # Primary: TMDb search (multi-strategy)
             tmdb = TMDbClient(settings.tmdb_api_key)
             movie = await tmdb.search_best_match(ai_title, year=ai_year)
+
+            # Fallback: OMDb → TMDb by imdbID
+            if not movie and settings.omdb_api_key:
+                from telonyx_cinema_bot.services.omdb import OMDbClient
+
+                omdb = OMDbClient(settings.omdb_api_key)
+                omdb_result = await omdb.search(ai_title, year=ai_year)
+                if omdb_result and omdb_result.imdb_id:
+                    logger.info("OMDb found %s (%s), trying TMDb find", omdb_result.imdb_id, omdb_result.title)
+                    movie = await tmdb.find_by_imdb_id(omdb_result.imdb_id)
+
             if movie:
                 item.movie_title = movie.title
                 item.movie_year = str(movie.release_year or "")
@@ -155,6 +167,7 @@ async def process_shorts_item(
                 item.movie_title = ai_title
                 item.movie_year = ai_year or ""
                 item.movie_genre = ""
+                item.tmdb_id = None  # ensure no card is posted
 
             if not movie and not item.movie_title:
                 # No title at all — stop and ask admin
@@ -173,8 +186,7 @@ async def process_shorts_item(
                     await bot.send_message(
                         admin_id,
                         f"⚠️ Shorts #{item_id}: не удалось определить фильм.\n"
-                        f"YouTube: {item.url}\n"
-                        f"AI: <b>{ai_title}</b> ({ai_year or '?'})\n\n"
+                        f"YouTube: {item.url}\n\n"
                         "Укажи фильм вручную.",
                         parse_mode="HTML",
                         reply_markup=kb,
@@ -197,9 +209,11 @@ async def process_shorts_item(
         item.status = ShortsQueueStatus.ready
         await session.flush()
 
-        # 1. Post Telegram card first (to get the URL for TikTok caption)
+        # 1. Post Telegram card only if we have full TMDb data
         from telonyx_cinema_bot.services.movie_card import format_movie_card, generate_tiktok_caption
         from telonyx_cinema_bot.services.tmdb import MovieMetadata
+
+        telegram_url = settings.channel_link or f"https://t.me/{settings.telegram_channel_id.lstrip('@')}"
 
         card_movie: MovieMetadata | None = None
         if item.tmdb_id:
@@ -208,52 +222,46 @@ async def process_shorts_item(
                 card_movie = await tmdb.fetch_movie(item.tmdb_id)
             except Exception:
                 logger.exception("Failed to fetch movie metadata for card")
-        elif item.movie_title:
-            try:
-                tmdb = TMDbClient(settings.tmdb_api_key)
-                card_movie = await tmdb.search_best_match(item.movie_title)
-            except Exception:
-                logger.exception("Failed to search movie for card")
 
-        card_text = format_movie_card(card_movie) if card_movie else (
-            f"<b>{item.movie_title or 'Фильм'}</b>"
-        )
+        if card_movie:
+            card_text = format_movie_card(card_movie)
+            poster_path: Path | None = None
+            poster_url = card_movie.poster_url
+            if poster_url:
+                try:
+                    import aiohttp
 
-        poster_path: Path | None = None
-        poster_url = card_movie.poster_url if card_movie else None
-        if poster_url:
-            try:
-                import aiohttp
+                    async with aiohttp.ClientSession() as s:
+                        async with s.get(poster_url) as resp:
+                            if resp.status == 200:
+                                data = await resp.read()
+                                poster_path = work_dir / "poster.jpg"
+                                poster_path.write_bytes(data)
+                except Exception:
+                    logger.exception("Failed to download poster")
 
-                async with aiohttp.ClientSession() as s:
-                    async with s.get(poster_url) as resp:
-                        if resp.status == 200:
-                            data = await resp.read()
-                            poster_path = work_dir / "poster.jpg"
-                            poster_path.write_bytes(data)
-            except Exception:
-                logger.exception("Failed to download poster")
+            if poster_path:
+                from aiogram.types import FSInputFile
 
-        if poster_path:
-            from aiogram.types import FSInputFile
+                msg = await bot.send_photo(
+                    settings.telegram_channel_id,
+                    photo=FSInputFile(str(poster_path)),
+                    caption=card_text,
+                    parse_mode="HTML",
+                )
+                item.telegram_file_id = msg.photo[-1].file_id if msg.photo else None
+            else:
+                msg = await bot.send_message(
+                    settings.telegram_channel_id,
+                    text=card_text,
+                    parse_mode="HTML",
+                    disable_web_page_preview=True,
+                )
+                item.telegram_file_id = None
 
-            msg = await bot.send_photo(
-                settings.telegram_channel_id,
-                photo=FSInputFile(str(poster_path)),
-                caption=card_text,
-                parse_mode="HTML",
-            )
-            item.telegram_file_id = msg.photo[-1].file_id if msg.photo else None
+            telegram_url = msg.get_url()
         else:
-            msg = await bot.send_message(
-                settings.telegram_channel_id,
-                text=card_text,
-                parse_mode="HTML",
-                disable_web_page_preview=True,
-            )
-            item.telegram_file_id = None
-
-        telegram_url = msg.get_url()
+            logger.info("No TMDb data for item %s — skipping Telegram card", item_id)
 
         # 2. TikTok caption with movie title + Telegram pitch + viral hashtags
         tiktok_caption = generate_tiktok_caption(card_movie, telegram_url, fallback_title=item.movie_title or "Фильм")
@@ -283,9 +291,9 @@ async def process_shorts_item(
             await bot.edit_message_text(
                 chat_id=settings.admin_user_ids[0] if settings.admin_user_ids else 0,
                 message_id=item.admin_msg_id,
-                text=f"✅ Опубликовано: {item.movie_title or '?'}\n{msg.get_url()}",
+                text=f"✅ Опубликовано: {item.movie_title or '?'}\n{telegram_url}",
                 reply_markup=InlineKeyboardMarkup(
-                    inline_keyboard=[[InlineKeyboardButton(text="📺 Посмотреть", url=msg.get_url())]]
+                    inline_keyboard=[[InlineKeyboardButton(text="📺 Посмотреть", url=telegram_url)]]
                 ),
                 disable_web_page_preview=True,
             )
