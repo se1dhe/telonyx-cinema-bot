@@ -93,15 +93,18 @@ def _sync_upload(
         from tiktok_uploader import tiktok
         from tiktok_uploader.Config import Config
 
-        # Point library paths into persistent storage
+        # Point library paths into persistent storage.
+        # Config is a singleton — class-level assignments like Config.COOKIES_DIR = ...
+        # DON'T affect the _options dict that the singleton properties actually read.
         cookies_dir = storage_dir / "tiktok" / "CookiesDir"
         videos_dir = storage_dir / "tiktok" / "VideosDirPath"
         cookies_dir.mkdir(parents=True, exist_ok=True)
         videos_dir.mkdir(parents=True, exist_ok=True)
 
-        Config.COOKIES_DIR = str(cookies_dir)
-        Config.VIDEOS_DIR = str(videos_dir)
-        Config.POST_PROCESSING_VIDEO_PATH = str(videos_dir)
+        config = Config.get()
+        config._options["COOKIES_DIR"] = str(cookies_dir)
+        config._options["VIDEOS_DIR"] = str(videos_dir)
+        config._options["POST_PROCESSING_VIDEO_PATH"] = str(videos_dir)
 
         if not init_tiktok_session(account_name, storage_dir):
             return False
