@@ -134,10 +134,16 @@ async def process_shorts_item(
 
         video_path = await download_video(item.url, work_dir, settings.yt_dlp_bin, cookies=cookies_path)
 
-        if not item.movie_title:
-            raw_meta = await extract_yt_metadata(item.url, settings.yt_dlp_bin, cookies=cookies_path)
-            raw_title = (raw_meta or {}).get("title", "") or ""
-            ai_title, ai_year = await copywriter.identify_movie_from_title(raw_title)
+        if not item.movie_title or not item.tmdb_id:
+            if not item.movie_title:
+                raw_meta = await extract_yt_metadata(item.url, settings.yt_dlp_bin, cookies=cookies_path)
+                raw_title = (raw_meta or {}).get("title", "") or ""
+                ai_title, ai_year = await copywriter.identify_movie_from_title(raw_title)
+                item.yt_raw_title = raw_title
+            else:
+                ai_title = item.movie_title
+                ai_year = item.movie_year or ""
+
             tmdb = TMDbClient(settings.tmdb_api_key)
             movie = await tmdb.search_best_match(ai_title, year=ai_year)
             if movie:
@@ -149,7 +155,6 @@ async def process_shorts_item(
                 item.movie_title = ai_title
                 item.movie_year = ai_year or ""
                 item.movie_genre = ""
-            item.yt_raw_title = raw_title
 
             if not movie and settings.admin_user_ids:
                 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -165,14 +170,17 @@ async def process_shorts_item(
                 )
                 await bot.send_message(
                     admin_id,
-                    f"⚠️ Shorts #{item_id}: фильм не найден в TMDb.\n"
+                    f"⚠️ Shorts #{item_id}: не удалось определить фильм.\n"
                     f"YouTube: {item.url}\n"
                     f"AI: <b>{ai_title}</b> ({ai_year or '?'})\n\n"
-                    "TikTok будет загружен, карточка в Telegram пропущена. "
-                    "Укажи фильм вручную, чтобы опубликовать карточку.",
+                    "Укажи фильм вручную — после этого бот загрузит видео в TikTok "
+                    "и опубликует карточку в Telegram.",
                     parse_mode="HTML",
                     reply_markup=kb,
                 )
+                item.status = ShortsQueueStatus.failed
+                item.error_message = "Фильм не определён"
+                return  # Stop — don't render, don't upload TikTok
 
         item.status = ShortsQueueStatus.rendering
         await session.flush()
@@ -187,29 +195,6 @@ async def process_shorts_item(
 
         item.status = ShortsQueueStatus.ready
         await session.flush()
-
-        # If movie not identified — skip Telegram card, just do TikTok
-        if not item.tmdb_id:
-            channel = settings.channel_link or f"https://t.me/c/{settings.telegram_channel_id.replace('-100', '')}"
-            tiktok_caption = (
-                "🎬 Кто это? Что за фильм? 👀\n\n"
-                "Полное название и разбор — в нашем Telegram 👇\n"
-                f"{channel}\n\n"
-                "#кино #shorts #telonyx_cinema"
-            )
-            if settings.tiktok_account_name:
-                storage_dir = Path(settings.storage_dir)
-                await upload_to_tiktok(
-                    video_path=output_path,
-                    title=tiktok_caption,
-                    account_name=settings.tiktok_account_name,
-                    storage_dir=storage_dir,
-                )
-            item.video_path = str(output_path)
-            item.status = ShortsQueueStatus.published
-            item.published_at = datetime.now(timezone.utc)
-            await session.flush()
-            return
 
         # 1. Post Telegram card first (to get the URL for TikTok caption)
         from telonyx_cinema_bot.services.movie_card import format_movie_card

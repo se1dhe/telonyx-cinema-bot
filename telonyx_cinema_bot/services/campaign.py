@@ -39,6 +39,8 @@ class CampaignPublisherService:
             imdb_id=film.imdb_id,
             imdb_rating=film.imdb_rating,
             genres=film.genres,
+            director=None,
+            cast=[],
             similar_movies=film.similar_movies,
             raw_metadata=film.raw_metadata,
         )
