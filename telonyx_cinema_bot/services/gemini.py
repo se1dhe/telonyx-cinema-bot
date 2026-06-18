@@ -4,11 +4,13 @@ import logging
 import re
 
 from google import genai
-from google.genai import errors
+from google.genai import errors as genai_errors
 
 from telonyx_cinema_bot.services.tmdb import MovieMetadata
 
 logger = logging.getLogger(__name__)
+
+_TRANSIENT_CODES = {429, 500, 502, 503}
 
 
 class GeminiCopywriter:
@@ -23,8 +25,11 @@ class GeminiCopywriter:
 
     def _log_generation_error(self, task: str, exc: Exception) -> None:
         status_code = getattr(exc, "code", None) or getattr(exc, "status_code", None)
-        if isinstance(exc, errors.ClientError) and status_code == 429:
+        if isinstance(exc, genai_errors.ClientError) and status_code == 429:
             logger.warning("Gemini quota exhausted while generating %s with model %s", task, self.model)
+            return
+        if isinstance(exc, genai_errors.ServerError) and status_code in _TRANSIENT_CODES:
+            logger.warning("Gemini transient error %s while generating %s with model %s", status_code, task, self.model)
             return
         logger.exception("Gemini failed to generate %s with model %s", task, self.model)
 
@@ -87,8 +92,13 @@ class GeminiCopywriter:
             "название фильма/сериала и год выхода.\n"
             "Верни строго в формате: НАЗВАНИЕ | ГОД\n"
             "Пример: Бойцовский клуб | 1999\n\n"
-            "Если год неопределим — поставь 0.\n"
-            "Если название неясно — верни оригинальный заголовок.\n\n"
+            "Правила:\n"
+            "- Определяй только УЖЕ ВЫШЕДШИЕ фильмы. Не путай с будущими премьерами.\n"
+            "- Если заголовок похож на несколько фильмов — выбери самый известный/популярный.\n"
+            "- Например, 'Новый Человек-паук' — это The Amazing Spider-Man (2012), "
+            "а НЕ 'Spider-Man: Brand New Day'.\n"
+            "- Если год неопределим — поставь 0.\n"
+            "- Если название неясно — верни оригинальный заголовок.\n\n"
             f"Заголовок: {raw_title}"
         )
         try:
