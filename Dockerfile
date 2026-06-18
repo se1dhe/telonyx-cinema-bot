@@ -29,11 +29,10 @@ RUN mkdir -p telonyx_cinema_bot && touch telonyx_cinema_bot/__init__.py && \
 RUN git clone https://github.com/makiisthenes/TiktokAutoUploader.git /opt/tiktok-autouploader && \
     cd /opt/tiktok-autouploader && \
     pip install --no-cache-dir -r requirements.txt && \
-    cd tiktok_uploader/tiktok-signature && npm install
+    cd tiktok_uploader/tiktok-signature && npm install && \
+    npx playwright install chromium
 
 ENV PYTHONPATH="/opt/tiktok-autouploader"
-ENV PLAYWRIGHT_BROWSERS_PATH="0"
-ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH="/usr/bin/google-chrome"
 
 # Layer 4: source code (fast, only this busts on code changes)
 COPY . .
