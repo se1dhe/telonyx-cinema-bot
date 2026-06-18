@@ -312,7 +312,7 @@ def build_router(
                 "🎬 <b>Добавить Shorts</b>\n"
                 "Пришлите ссылку на YouTube Shorts.\n\n"
                 "Бот скачает видео, наложит плашку с названием фильма, "
-                "опубликует в TikTok и Telegram по расписанию.",
+                "отправит готовое видео и подпись для TikTok вам в личку.",
                 parse_mode=ParseMode.HTML,
                 reply_markup=_cancel_menu(),
             )
@@ -575,8 +575,7 @@ def build_router(
                 msg_parts = [f"✅ Shorts #{item_id} обработан."]
                 if item and item.status == ShortsQueueStatus.published:
                     msg_parts.append("📢 Telegram: опубликовано")
-                    if settings.tiktok_account_name:
-                        msg_parts.append("🎵 TikTok: загружено (проверьте в приложении)")
+                    msg_parts.append("📤 Видео отправлено администратору")
                 elif item and item.status == ShortsQueueStatus.failed:
                     msg_parts.append(f"❌ Ошибка: {item.error_message or 'неизвестно'}")
                 else:

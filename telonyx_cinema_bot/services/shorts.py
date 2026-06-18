@@ -11,7 +11,6 @@ from telonyx_cinema_bot.config import Settings
 from telonyx_cinema_bot.models import ShortsQueue, ShortsQueueStatus
 from telonyx_cinema_bot.services.gemini import GeminiCopywriter
 from telonyx_cinema_bot.services.overlay import render_with_overlay
-from telonyx_cinema_bot.services.tiktok_uploader import upload_to_tiktok
 from telonyx_cinema_bot.services.tmdb import TMDbClient
 
 logger = logging.getLogger(__name__)
@@ -209,9 +208,10 @@ async def process_shorts_item(
         item.status = ShortsQueueStatus.ready
         await session.flush()
 
-        # 1. Post Telegram card only if we have full TMDb data
+        # 4. Post Telegram card (7-day dedup)
         from telonyx_cinema_bot.services.movie_card import format_movie_card, generate_tiktok_caption
         from telonyx_cinema_bot.services.tmdb import MovieMetadata
+        from datetime import timedelta
 
         telegram_url = settings.channel_link or f"https://t.me/{settings.telegram_channel_id.lstrip('@')}"
 
@@ -223,7 +223,23 @@ async def process_shorts_item(
             except Exception:
                 logger.exception("Failed to fetch movie metadata for card")
 
+        should_post_card = False
         if card_movie:
+            seven_days_ago = datetime.now(timezone.utc) - timedelta(days=7)
+            recent_card = await session.scalar(
+                select(ShortsQueue)
+                .where(
+                    ShortsQueue.tmdb_id == item.tmdb_id,
+                    ShortsQueue.telegram_file_id.isnot(None),
+                    ShortsQueue.published_at >= seven_days_ago,
+                    ShortsQueue.id != item.id,
+                )
+                .limit(1)
+            )
+            if recent_card is None:
+                should_post_card = True
+
+        if should_post_card:
             card_text = format_movie_card(card_movie)
             poster_path: Path | None = None
             poster_url = card_movie.poster_url
@@ -261,27 +277,32 @@ async def process_shorts_item(
 
             telegram_url = msg.get_url()
         else:
-            logger.info("No TMDb data for item %s — skipping Telegram card", item_id)
+            if card_movie:
+                logger.info("Card for tmdb_id %s was posted within 7 days — skipping", item.tmdb_id)
+            else:
+                logger.info("No TMDb data for item %s — skipping Telegram card", item_id)
+            item.telegram_file_id = None
 
-        # 2. TikTok caption with movie title + Telegram pitch + viral hashtags
+        # 5. TikTok caption with movie title + Telegram pitch + viral hashtags
         tiktok_caption = generate_tiktok_caption(card_movie, telegram_url, fallback_title=item.movie_title or "Фильм")
 
-        # 3. Upload to TikTok
-        if settings.tiktok_account_name:
-            logger.info("Uploading to TikTok as %s", settings.tiktok_account_name)
-            storage_dir = Path(settings.storage_dir)
-            tiktok_ok = await upload_to_tiktok(
-                video_path=output_path,
-                title=tiktok_caption,
-                account_name=settings.tiktok_account_name,
-                storage_dir=storage_dir,
-                draft=settings.tiktok_draft_only,
-            )
-            if tiktok_ok:
-                logger.info("TikTok upload complete")
-            else:
-                logger.warning("TikTok upload failed")
+        # 6. Send video + caption to admin for manual TikTok upload
+        if settings.admin_user_ids:
+            from aiogram.types import FSInputFile as _FSInputFile
 
+            admin_id = settings.admin_user_ids[0]
+            try:
+                await bot.send_video(
+                    admin_id,
+                    video=_FSInputFile(str(output_path)),
+                    caption=f"🎬 <b>{item.movie_title or 'Фильм'}</b>\n\n{tiktok_caption}",
+                    parse_mode="HTML",
+                    supports_streaming=True,
+                )
+            except Exception:
+                logger.exception("Failed to send rendered video to admin %s", admin_id)
+
+        # 7. Mark published
         item.video_path = str(output_path)
         item.status = ShortsQueueStatus.published
         item.published_at = datetime.now(timezone.utc)
