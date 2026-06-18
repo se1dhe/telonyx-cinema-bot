@@ -40,7 +40,7 @@ if old_1 in content:
 else:
     print("WARNING: patch 1 (cookies) pattern not found")
 
-# --- Patch 2: on publish success, print share URL ---
+# --- Patch 2: on publish success, print share URL (construct from item_id if missing) ---
 old_2 = (
     '\t\tif r.json()["status_code"] == 0:\n'
     '\t\t\tprint(f"Published successfully '
@@ -50,9 +50,11 @@ old_2 = (
 )
 new_2 = (
     '\t\tif r.json()["status_code"] == 0:\n'
-    '\t\t\tprint(f"Published successfully! '
-    "ID={r.json().get('single_post_resp_list',[{}])[0].get('item_id','')} "
-    "URL={r.json().get('single_post_resp_list',[{}])[0].get('share_url','')}\")\n"
+    '\t\t\t_id = r.json().get("single_post_resp_list",[{}])[0].get("item_id","")\n'
+    '\t\t\t_url = r.json().get("single_post_resp_list",[{}])[0].get("share_url","")\n'
+    '\t\t\tif not _url and _id:\n'
+    '\t\t\t\t_url = f"https://www.tiktok.com/video/{_id}"\n'
+    '\t\t\tprint(f"Published successfully! ID={_id} URL={_url}")\n'
     '\t\t\tuploaded = True\n'
     '\t\t\tbreak'
 )
