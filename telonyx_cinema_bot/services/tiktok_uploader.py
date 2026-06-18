@@ -131,8 +131,15 @@ def _sync_upload(
             )
         library_output = buf.getvalue()
         if library_output:
-            # Показываем последние 2kb вывода библиотеки (там обычно статусы и тело ответа)
+            # Показываем последние 2kb вывода библиотеки
             logger.info("TikTok library output:\n%s", library_output.strip()[-2048:])
+            # Парсим URL из строки "Published successfully!  ID=...  URL=..."
+            if "Published successfully" in library_output:
+                import re as _re
+                m = _re.search(r'URL=(\S+)', library_output)
+                url = m.group(1) if m else ""
+                if url:
+                    logger.info("TikTok video URL: %s", url)
 
         if ok:
             logger.info("TikTok upload ok for %s", account_name)
