@@ -14,7 +14,6 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from telonyx_cinema_bot.config import Settings
 from telonyx_cinema_bot.models import ShortsQueue, ShortsQueueStatus
 from telonyx_cinema_bot.services.editorial import EditorialService
-from telonyx_cinema_bot.services.shorts import process_shorts_item
 
 
 class ManualPostStates(StatesGroup):
@@ -29,6 +28,10 @@ class AddShortsStates(StatesGroup):
     waiting_for_next_url = State()
 
 
+class DownloadStates(StatesGroup):
+    waiting_for_url = State()
+
+
 def _main_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -41,6 +44,7 @@ def _main_menu() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="📰 Ручной пост", callback_data="manual:start")],
             [InlineKeyboardButton(text="🎬 Shorts", callback_data="shorts:add")],
             [InlineKeyboardButton(text="📹 Shorts очередь", callback_data="shorts:queue")],
+            [InlineKeyboardButton(text="📥 Скачать", callback_data="download:start")],
         ]
     )
 
@@ -389,6 +393,63 @@ def build_router(
 
         await state.clear()
 
+    @router.callback_query(F.data == "download:start")
+    async def cb_download_start(callback: CallbackQuery, state: FSMContext) -> None:
+        if not _is_admin_cb(callback):
+            await callback.answer("Только для администраторов.", show_alert=True)
+            return
+
+        await state.set_state(DownloadStates.waiting_for_url)
+        if callback.message:
+            await _replace_callback_message(
+                callback.message,
+                "📥 <b>Скачать видео</b>\n"
+                "Пришлите ссылку на YouTube-видео.\n\n"
+                "Бот скачает видео в лучшем доступном качестве и отдаст ссылку с сервера.",
+                parse_mode=ParseMode.HTML,
+                reply_markup=_cancel_menu(),
+            )
+        await callback.answer()
+
+    @router.message(StateFilter(DownloadStates.waiting_for_url))
+    async def fsm_receive_download_url(message: Message, state: FSMContext) -> None:
+        if not _is_admin_msg(message):
+            return
+
+        url = (message.text or "").strip()
+        if not url.startswith("http"):
+            await message.answer("⚠️ Нужна ссылка (начинается с http).", reply_markup=_cancel_menu())
+            return
+
+        await state.clear()
+        status_msg = await message.answer("⏳ Скачиваю видео в лучшем доступном качестве...")
+
+        try:
+            from telonyx_cinema_bot.services.downloads import prepare_video_download
+
+            result = await prepare_video_download(url, settings)
+        except Exception as exc:
+            await status_msg.answer(
+                f"❌ Не удалось скачать видео:\n{str(exc)[:500]}",
+                reply_markup=_main_menu(),
+            )
+            return
+
+        if result.url:
+            await status_msg.answer(
+                "✅ Видео готово.\n\n"
+                f"📥 <a href='{result.url}'>Скачать видео</a>",
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=True,
+                reply_markup=_main_menu(),
+            )
+        else:
+            await status_msg.answer(
+                "✅ Видео скачано, но PUBLIC_DOMAIN не настроен — "
+                "ссылку с сервера сформировать не удалось.",
+                reply_markup=_main_menu(),
+            )
+
     @router.callback_query(F.data.startswith("shorts:retry:"))
     async def cb_shorts_retry(callback: CallbackQuery) -> None:
         if not _is_admin_cb(callback):
@@ -539,7 +600,6 @@ def build_router(
             await message.answer("⚠️ Нужна ссылка (начинается с http).", reply_markup=_cancel_menu())
             return
 
-        from sqlalchemy import select
         from datetime import datetime
         admin_id = message.from_user.id
 

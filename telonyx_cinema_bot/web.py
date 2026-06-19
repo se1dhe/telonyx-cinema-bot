@@ -23,6 +23,17 @@ def build_app(settings: Settings) -> FastAPI:
             filename=f"shorts_{item_id}.mp4",
         )
 
+    @app.get("/downloads/{download_id}")
+    async def download_video(download_id: str) -> FileResponse:
+        path = storage_dir / "downloads" / download_id / "video.mp4"
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="not found")
+        return FileResponse(
+            str(path),
+            media_type="video/mp4",
+            filename=f"video_{download_id}.mp4",
+        )
+
     @app.get("/health")
     async def health() -> dict[str, str]:
         return {"status": "ok"}
